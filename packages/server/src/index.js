@@ -29,6 +29,16 @@ app.use('/api/sales',        salesRouter);
 
 startScheduler();
 
+if (process.env.NODE_ENV === 'production') {
+  const clientBuild = require('path').join(__dirname, '../../client/dist');
+  app.use(express.static(clientBuild));
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api')) {
+      res.sendFile(require('path').join(clientBuild, 'index.html'));
+    }
+  });
+}
+
 app.listen(PORT, () => {
   console.log(`Huracan server running on http://localhost:${PORT}`);
 });

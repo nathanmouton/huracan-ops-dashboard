@@ -7,6 +7,8 @@
   ],
   "scripts": {
     "dev:server": "npm --workspace packages/server run dev",
-    "dev:client": "npm --workspace packages/client run dev"
+    "dev:client": "npm --workspace packages/client run dev",
+    "build": "npm --workspace packages/client run build",
+    "start": "NODE_ENV=production node packages/server/src/index.js"
   }
 }

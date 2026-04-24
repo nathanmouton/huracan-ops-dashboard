@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-const http = axios.create({ baseURL: '/api' });
+const BASE_URL = import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? '' : 'http://localhost:3001');
+
+const http = axios.create({ baseURL: `${BASE_URL}/api` });
 
 function locParam(locationId) {
   return locationId != null ? { location_id: locationId } : {};
