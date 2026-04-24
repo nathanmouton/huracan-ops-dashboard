@@ -1,0 +1,86 @@
+.wrapper {
+  overflow-x: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th {
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  background: var(--bg);
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.table tr:hover td {
+  background: var(--surface);
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* status pills */
+.pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.scheduled {
+  background: rgba(120, 130, 255, 0.12);
+  color: #9da8ff;
+}
+
+.in_progress {
+  background: rgba(240, 165, 0, 0.12);
+  color: #f0a500;
+}
+
+.completed {
+  background: rgba(62, 207, 142, 0.12);
+  color: #3ecf8e;
+}
+
+.cancelled {
+  background: rgba(224, 82, 82, 0.12);
+  color: #e05252;
+}
+
+.empty {
+  padding: 48px;
+  text-align: center;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+}

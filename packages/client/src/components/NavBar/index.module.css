@@ -1,0 +1,100 @@
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 24px;
+  height: 56px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  flex-shrink: 0;
+}
+
+.tab {
+  padding: 4px 14px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab.tabActive {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.logo {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.filters {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.btn {
+  padding: 4px 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+
+.sync {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.refreshing {
+  color: var(--accent);
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+.synced {
+  color: var(--text-muted);
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}

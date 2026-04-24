@@ -1,0 +1,5 @@
+external_id,job_id,rep_id,location_id,item,amount,sold_at
+UPS-001,JOB-001,REP-001,1,ceramic coating maintenance kit,89.00,2026-04-01
+UPS-002,JOB-001,REP-001,1,interior ozone treatment,120.00,2026-04-01
+UPS-003,JOB-002,REP-002,1,glass coating add-on,250.00,2026-04-02
+UPS-004,JOB-005,REP-005,4,engine bay detail,150.00,2026-04-10

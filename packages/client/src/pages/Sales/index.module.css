@@ -1,0 +1,540 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── always-visible summary strip ────────────────────────────── */
+.summaryStrip {
+  position: sticky;
+  top: 104px; /* 56px app nav + 48px sub-nav */
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  background: #111;
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  height: 36px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.stripSegment {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.stripLabel  { color: var(--text-muted); }
+.stripValue  { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.stripMuted  { color: var(--text-muted); }
+
+.stripDivider {
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 16px;
+  flex-shrink: 0;
+}
+
+/* ── sticky sub-nav ───────────────────────────────────────────── */
+.subNav {
+  position: sticky;
+  top: 56px;
+  z-index: 90;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  height: 48px;
+  gap: 12px;
+}
+
+.subNavTabs { display: flex; gap: 2px; }
+
+.subNavTab {
+  padding: 5px 16px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.subNavTab:hover { color: var(--text); }
+.subNavTabActive { color: var(--accent); background: rgba(232, 89, 60, 0.1); }
+
+.subNavRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.syncedAt { font-size: 11px; color: var(--text-muted); }
+
+.syncBtn {
+  padding: 5px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.syncBtn:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.syncBtn:disabled { opacity: 0.45; cursor: default; }
+
+/* ── section structure ────────────────────────────────────────── */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 28px 24px 32px;
+  scroll-margin-top: 148px;
+}
+
+.sectionBreak {
+  height: 1px;
+  background: var(--border);
+  margin: 0 24px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.sectionTitle {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.sectionDate { font-size: 13px; color: var(--text-muted); }
+
+.sectionLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-muted);
+}
+
+.emptyState {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── KPI strip (Monthly + Daily) ──────────────────────────────── */
+.kpiStrip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.kpiStrip3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.spotlightRow2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.kpiCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.2s;
+}
+
+.kpiLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.kpiValue {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.kpiSub { font-size: 11px; color: var(--text-muted); }
+
+/* pace progress bar (inside Daily KPI pace card) */
+.paceBarTrack {
+  width: 100%;
+  height: 4px;
+  background: #252525;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.paceBarFill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+/* ── spotlight cards ──────────────────────────────────────────── */
+.spotlightRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.spotlightCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--rep-color, var(--accent));
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.spotlightIcon { font-size: 20px; line-height: 1; flex-shrink: 0; }
+
+.spotlightInfo { display: flex; flex-direction: column; gap: 1px; }
+
+.spotlightLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.spotlightName { font-size: 15px; font-weight: 700; line-height: 1.2; }
+
+.spotlightStat { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* ── leaderboard table ────────────────────────────────────────── */
+.leaderRow { background: rgba(255, 255, 255, 0.02); }
+
+.actHigh { font-size: 11px; font-weight: 600; color: #3ecf8e; }
+.actLow  { font-size: 11px; color: rgba(239, 68, 68, 0.7); }
+
+/* ── daily rep status badges ──────────────────────────────────── */
+.statusLeading {
+  font-size: 11px;
+  font-weight: 600;
+  color: #3ecf8e;
+}
+
+.statusActive {
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.statusNone {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── weekly rep cards grid ────────────────────────────────────── */
+.repGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .repGrid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.repCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.repCard::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 3px 0 0 3px;
+  background: var(--rep-color, var(--accent));
+}
+
+.repCardHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.repName { font-size: 15px; font-weight: 600; color: var(--text); }
+
+.repRevenue {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  margin-top: 6px;
+}
+
+.progressTrack {
+  width: 100%;
+  height: 4px;
+  background: #252525;
+  border-radius: 2px;
+  margin: 8px 0 6px;
+  overflow: hidden;
+}
+
+.progressFill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+
+.progressLabel { font-size: 10px; color: var(--text-muted); margin-bottom: 4px; }
+
+.goalRemaining { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+.goalReached   { font-size: 11px; color: #3ecf8e; font-weight: 500; margin-bottom: 8px; }
+
+.pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+
+.pill {
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sparklineWrap { margin-top: auto; height: 44px; }
+
+/* ── tables ───────────────────────────────────────────────────── */
+.tableWrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+.table th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 10px 14px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table tbody tr:last-child td { border-bottom: none; }
+.table tbody tr:hover td { background: rgba(255,255,255,0.015); }
+
+.num { text-align: right !important; font-variant-numeric: tabular-nums; }
+
+.empty { text-align: center; color: var(--text-muted); padding: 28px 0 !important; }
+
+.goalCell { min-width: 120px; padding-right: 16px !important; }
+
+.goalBarWrap { display: flex; align-items: center; gap: 8px; }
+
+.goalBarTrack {
+  flex: 1;
+  height: 4px;
+  background: #252525;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.goalBarFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.goalPct {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 32px;
+  text-align: right;
+}
+
+.closesTotalRow td {
+  padding: 10px 14px;
+  background: #1e1e1e;
+  border-top: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── charts ───────────────────────────────────────────────────── */
+.charts3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.chartCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 20px 14px;
+}
+
+.chartTitle {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+.emptyChart {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── weekly accordion ─────────────────────────────────────────── */
+.weeklySection { display: flex; flex-direction: column; gap: 8px; }
+
+.weekItem {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.weekItemCurrent { border-left: 2px solid var(--accent); }
+
+.currentBadge {
+  display: inline-block;
+  margin-left: 10px;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(232, 89, 60, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(232, 89, 60, 0.3);
+  font-weight: 500;
+  vertical-align: middle;
+}
+
+.weekHeader {
+  display: flex;
+  align-items: center;
+  padding: 13px 16px;
+  cursor: pointer;
+  user-select: none;
+  gap: 12px;
+}
+.weekHeader:hover { background: rgba(255,255,255,0.02); }
+
+.weekLabel { font-size: 13px; font-weight: 500; color: var(--text); flex: 1; }
+
+.weekTotals {
+  display: flex;
+  gap: 20px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.weekTotalItem strong { color: var(--text); font-weight: 600; }
+
+.chevron {
+  color: var(--text-muted);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+.chevronOpen { transform: rotate(90deg); }
+
+.weekBody { border-top: 1px solid var(--border); }
+
+.weekTable { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+.weekTable th {
+  padding: 9px 14px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,0.01);
+}
+
+.weekTable td {
+  padding: 9px 14px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+
+.weekTable tbody tr:last-child td { border-bottom: none; }
+.weekTable tbody tr:hover td { background: rgba(255,255,255,0.015); }
+
+.totalRow td {
+  background: #1e1e1e;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── rep color dot in tables ──────────────────────────────────── */
+.repDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}

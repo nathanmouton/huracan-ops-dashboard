@@ -1,0 +1,12 @@
+{
+  "name": "huracan",
+  "private": true,
+  "workspaces": [
+    "packages/server",
+    "packages/client"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace packages/server run dev",
+    "dev:client": "npm --workspace packages/client run dev"
+  }
+}

@@ -1,0 +1,6 @@
+external_id,location_id,rep_id,customer_name,service_type,status,scheduled_at,completed_at,vehicle_year,vehicle_make,vehicle_model,revenue
+JOB-001,1,,Marcus Webb,ceramic coating,completed,2026-04-01 09:00,2026-04-01 14:30,2023,BMW,M4 Competition,1850.00
+JOB-002,1,,Priya Nair,paint correction,completed,2026-04-02 10:00,2026-04-02 16:00,2022,Porsche,911 Carrera S,1200.00
+JOB-003,2,,Diego Reyes,PPF full front,in_progress,2026-04-17 08:00,,2024,Tesla,Model S Plaid,2400.00
+JOB-004,3,,Camille Fontenot,window tint,scheduled,2026-04-18 11:00,,2021,Land Rover,Range Rover HSE,650.00
+JOB-005,4,,Ethan Broussard,full detail,completed,2026-04-10 09:00,2026-04-10 13:00,2023,Lamborghini,Urus,750.00

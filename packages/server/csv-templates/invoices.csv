@@ -1,0 +1,6 @@
+external_id,job_id,location_id,amount,status,issued_at,paid_at
+INV-001,JOB-001,1,1850.00,paid,2026-04-01,2026-04-01
+INV-002,JOB-002,1,1200.00,paid,2026-04-02,2026-04-03
+INV-003,JOB-003,2,2400.00,pending,2026-04-17,
+INV-004,JOB-004,3,650.00,pending,2026-04-17,
+INV-005,JOB-005,4,750.00,paid,2026-04-10,2026-04-10
