@@ -20,7 +20,8 @@ async function sheetsGet(range) {
 // "4/13/2026" → "2026-04-13". Returns null for blank or malformed.
 function parseDate(str) {
   if (!str) return null;
-  const m = String(str).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  // Trim first — Google Sheets sometimes pads with whitespace
+  const m = String(str).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) return null;
   const year = parseInt(m[3], 10);
   if (year < 2000 || year > 2100) return null;
@@ -30,12 +31,28 @@ function parseDate(str) {
 // "$14,034.00" or "14034" → 14034
 function parseRevenue(str) {
   if (!str) return 0;
-  return parseFloat(String(str).replace(/[$,]/g, '')) || 0;
+  return parseFloat(String(str).replace(/[$,\s]/g, '')) || 0;
 }
 
 // ─── parsers ─────────────────────────────────────────────────────────────────
 
 const WEEKLY_SENTINELS = new Set(['', 'Rep Name', 'TOTAL', 'END', 'Huracan Nero Auto Spa']);
+
+// Known sales rep first names — used for positive identification of close log rows.
+// Case-insensitive partial match handles "Martinez", "martinez", etc.
+const KNOWN_REP_NAMES = ['martinez', 'alejandro', 'jahmad', 'jacob', 'rodrigo'];
+
+function isKnownRep(name) {
+  const lower = name.toLowerCase();
+  return KNOWN_REP_NAMES.some((rep) => lower.includes(rep) || rep.includes(lower));
+}
+
+// A revenue cell starts with "$" or begins with a digit (after trimming).
+function isRevenueCell(str) {
+  if (!str) return false;
+  const s = String(str).trim();
+  return s.startsWith('$') || /^\d/.test(s);
+}
 
 // Weekly Summary sheet — reads dials/texts from weekly table blocks.
 // Skips rows where col[1] is a valid full date (those are close log rows).
@@ -55,7 +72,7 @@ function parseWeeklyStats(rows) {
 
     if (WEEKLY_SENTINELS.has(cell0) || /^\d{2}\/\d{2}-\d{2}\/\d{2}$/.test(cell0)) continue;
 
-    // Close log rows have a full date in col[1] — skip here, handled by parseCloseLog
+    // Close log rows have a full date in col[1] — skip here
     if (parseDate(row[1])) continue;
 
     if (!weekStart) continue;
@@ -76,15 +93,45 @@ function parseWeeklyStats(rows) {
   return results;
 }
 
-// Close log at the bottom of Weekly Summary: Rep | Date | Revenue | Lead Source | Location
-// A close log row is identified by col[1] being a valid full date (M/D/YYYY).
+// Close log section: Rep | Date | Revenue | Lead Source | Location
+//
+// Detection uses POSITIVE matching on all three of:
+//   col[0] — known rep name (case-insensitive partial match)
+//   col[1] — valid M/D/YYYY date
+//   col[2] — revenue cell (starts with $ or is numeric)
+//
+// This is more reliable than the previous negative-sentinel approach and
+// correctly ignores weekly-block header/total rows without needing to track
+// whether we are "inside" a week block.
 function parseCloseLog(rows) {
+  // ── diagnostic: log first 20 non-empty rows so mismatches are visible ──────
+  const sample = rows
+    .filter((r) => r && r.length > 0 && String(r[0] || '').trim())
+    .slice(0, 20);
+  console.log('[parseCloseLog] First 20 non-empty rows from sheet:');
+  sample.forEach((row, i) => {
+    console.log(
+      `  [${i}] col0=${JSON.stringify(row[0])} col1=${JSON.stringify(row[1])} ` +
+      `col2=${JSON.stringify(row[2])} col3=${JSON.stringify(row[3])} col4=${JSON.stringify(row[4])}`
+    );
+  });
+
   const results = [];
+  let skippedNoRep = 0, skippedSentinel = 0, skippedUnknownRep = 0;
+  let skippedNoDate = 0, skippedNoRevenue = 0;
+
   for (const row of rows) {
     const rep = (row[0] || '').trim();
-    if (!rep || WEEKLY_SENTINELS.has(rep)) continue;
+
+    if (!rep)                          { skippedNoRep++;      continue; }
+    if (WEEKLY_SENTINELS.has(rep))     { skippedSentinel++;   continue; }
+    if (!isKnownRep(rep))              { skippedUnknownRep++; continue; }
+
     const date = parseDate(row[1]);
-    if (!date) continue;
+    if (!date)                         { skippedNoDate++;     continue; }
+
+    if (!isRevenueCell(row[2]))        { skippedNoRevenue++;  continue; }
+
     results.push({
       rep_name:    rep,
       close_date:  date,
@@ -93,6 +140,13 @@ function parseCloseLog(rows) {
       location:    (row[4] || '').trim() || null,
     });
   }
+
+  console.log(
+    `[parseCloseLog] Parsed ${results.length} closes. ` +
+    `Skipped: empty=${skippedNoRep}, sentinel=${skippedSentinel}, ` +
+    `unknown-rep=${skippedUnknownRep}, no-date=${skippedNoDate}, no-revenue=${skippedNoRevenue}`
+  );
+
   return results;
 }
 
@@ -111,6 +165,26 @@ function parseDailyActivity(rows) {
     results.push({ rep_name: rep, activity_date: date, dials, texts });
   }
   return results;
+}
+
+// ─── fetchParsed (debug — no DB writes) ──────────────────────────────────────
+
+// Fetches both sheets and returns the parsed data without writing anything to
+// the database. Used by GET /api/sales/debug-sync so parsing can be verified
+// in production without affecting live data.
+async function fetchParsed() {
+  const [weeklyRows, activityRows] = await Promise.all([
+    sheetsGet('Weekly Summary!A1:Z2000'),
+    sheetsGet('KPI_RAW!A1:Z2000'),
+  ]);
+
+  return {
+    weekly_stats: parseWeeklyStats(weeklyRows),
+    closes:       parseCloseLog(weeklyRows),
+    activity:     parseDailyActivity(activityRows),
+    // Raw sample so the caller can see exactly what Google Sheets returned
+    raw_weekly_sample: weeklyRows.slice(0, 30),
+  };
 }
 
 // ─── syncSheetsData ──────────────────────────────────────────────────────────
@@ -157,15 +231,17 @@ async function syncSheetsData() {
         summary.weekly++;
       }
 
-      // Closes: full replace (a rep can have multiple closes on the same date)
-      await tx.run('DELETE FROM rep_closes');
+      // Closes: non-destructive upsert keyed on (rep_name, close_date, revenue).
+      // DO NOTHING preserves closes that were imported in previous syncs and
+      // are no longer present in the current sheet window.
       for (const row of closes) {
-        await tx.run(
+        const { lastId } = await tx.run(
           `INSERT INTO rep_closes (rep_name, close_date, revenue, lead_source, location, synced_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(rep_name, close_date, revenue) DO NOTHING`,
           [row.rep_name, row.close_date, row.revenue, row.lead_source, row.location, now]
         );
-        summary.closes++;
+        if (lastId !== null) summary.closes++;
       }
 
       // Daily activity: upsert by (rep_name, activity_date)
@@ -190,4 +266,4 @@ async function syncSheetsData() {
   return summary;
 }
 
-module.exports = { syncSheetsData };
+module.exports = { syncSheetsData, fetchParsed };

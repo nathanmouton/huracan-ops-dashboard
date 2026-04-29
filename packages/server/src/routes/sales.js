@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const db = require('../../db/schema');
-const { syncSheetsData } = require('../services/sheetsSync');
+const { syncSheetsData, fetchParsed } = require('../services/sheetsSync');
 
 const router = Router();
 
@@ -292,6 +292,17 @@ router.get('/sync/now', async (_req, res) => {
   try {
     const summary = await syncSheetsData();
     res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/sales/debug-sync ───────────────────────────────────────────────
+
+router.get('/debug-sync', async (_req, res) => {
+  try {
+    const data = await fetchParsed();
+    res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

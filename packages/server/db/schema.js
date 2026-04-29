@@ -240,7 +240,8 @@ const PG_DDL = `
     revenue     REAL NOT NULL DEFAULT 0,
     lead_source TEXT,
     location    TEXT,
-    synced_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    synced_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(rep_name, close_date, revenue)
   );
 
   CREATE TABLE IF NOT EXISTS rep_daily_activity (
@@ -445,6 +446,7 @@ async function initSchema() {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_external_id     ON jobs(external_id);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_external_id ON invoices(external_id);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_upsells_external_id  ON upsells(external_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_rep_closes_unique    ON rep_closes(rep_name, close_date, revenue);
     `);
 
     console.log('[db] SQLite schema ready');
