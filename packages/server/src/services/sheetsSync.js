@@ -20,11 +20,10 @@ async function sheetsGet(range) {
 // "4/13/2026" → "2026-04-13". Returns null for blank or malformed.
 function parseDate(str) {
   if (!str) return null;
-  // Trim first — Google Sheets sometimes pads with whitespace
   const m = String(str).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) return null;
   const year = parseInt(m[3], 10);
-  if (year < 2000 || year > 2100) return null;
+  if (year < 2024 || year > 2027) return null;
   return `${year}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`;
 }
 
@@ -34,28 +33,12 @@ function parseRevenue(str) {
   return parseFloat(String(str).replace(/[$,\s]/g, '')) || 0;
 }
 
-// ─── parsers ─────────────────────────────────────────────────────────────────
-
-const WEEKLY_SENTINELS = new Set(['', 'Rep Name', 'TOTAL', 'END', 'Huracan Nero Auto Spa']);
-
-// Known sales rep first names — used for positive identification of close log rows.
-// Case-insensitive partial match handles "Martinez", "martinez", etc.
-const KNOWN_REP_NAMES = ['martinez', 'alejandro', 'jahmad', 'jacob', 'rodrigo'];
-
-function isKnownRep(name) {
-  const lower = name.toLowerCase();
-  return KNOWN_REP_NAMES.some((rep) => lower.includes(rep) || rep.includes(lower));
-}
-
-// A revenue cell starts with "$" or begins with a digit (after trimming).
-function isRevenueCell(str) {
-  if (!str) return false;
-  const s = String(str).trim();
-  return s.startsWith('$') || /^\d/.test(s);
-}
+// ─── parseWeeklyStats ────────────────────────────────────────────────────────
 
 // Weekly Summary sheet — reads dials/texts from weekly table blocks.
 // Skips rows where col[1] is a valid full date (those are close log rows).
+const WEEKLY_SENTINELS = new Set(['', 'Rep Name', 'TOTAL', 'END', 'Huracan Nero Auto Spa']);
+
 function parseWeeklyStats(rows) {
   const results = [];
   let weekStart = null;
@@ -75,6 +58,9 @@ function parseWeeklyStats(rows) {
     // Close log rows have a full date in col[1] — skip here
     if (parseDate(row[1])) continue;
 
+    // Skip once we hit the close log header row
+    if (cell0 === 'Rep' && (row[1] || '').trim() === 'Date') continue;
+
     if (!weekStart) continue;
 
     results.push({
@@ -93,62 +79,150 @@ function parseWeeklyStats(rows) {
   return results;
 }
 
-// Close log section: Rep | Date | Revenue | Lead Source | Location
-//
-// Detection uses POSITIVE matching on all three of:
-//   col[0] — known rep name (case-insensitive partial match)
-//   col[1] — valid M/D/YYYY date
-//   col[2] — revenue cell (starts with $ or is numeric)
-//
-// This is more reliable than the previous negative-sentinel approach and
-// correctly ignores weekly-block header/total rows without needing to track
-// whether we are "inside" a week block.
+// ─── parseCloseLog ───────────────────────────────────────────────────────────
+
+// Scans for the close log header row: col[0]="Rep", col[1]="Date", col[2]="Revenue"
+// Reads entries until the daily activity header: col[0]="Rep", col[3]="Dials"
 function parseCloseLog(rows) {
-  // ── diagnostic: log first 20 non-empty rows so mismatches are visible ──────
-  const sample = rows
-    .filter((r) => r && r.length > 0 && String(r[0] || '').trim())
-    .slice(0, 20);
-  console.log('[parseCloseLog] First 20 non-empty rows from sheet:');
-  sample.forEach((row, i) => {
-    console.log(
-      `  [${i}] col0=${JSON.stringify(row[0])} col1=${JSON.stringify(row[1])} ` +
-      `col2=${JSON.stringify(row[2])} col3=${JSON.stringify(row[3])} col4=${JSON.stringify(row[4])}`
-    );
-  });
+  // Find close log header
+  let closeStart = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (
+      (r[0] || '').trim() === 'Rep' &&
+      (r[1] || '').trim() === 'Date' &&
+      (r[2] || '').trim() === 'Revenue'
+    ) {
+      closeStart = i + 1;
+      console.log(`[parseCloseLog] Header found at row index ${i}`);
+      break;
+    }
+  }
+
+  if (closeStart === -1) {
+    console.warn('[parseCloseLog] Close log header not found — no closes parsed');
+    return [];
+  }
 
   const results = [];
-  let skippedNoRep = 0, skippedSentinel = 0, skippedUnknownRep = 0;
-  let skippedNoDate = 0, skippedNoRevenue = 0;
+  let skippedEmpty = 0, skippedDate = 0, skippedRevenue = 0, total = 0;
 
-  for (const row of rows) {
-    const rep = (row[0] || '').trim();
+  for (let i = closeStart; i < rows.length; i++) {
+    const row  = rows[i];
+    const col0 = (row[0] || '').trim();
+    const col1 = (row[1] || '').trim();
+    const col3 = (row[3] || '').trim();
 
-    if (!rep)                          { skippedNoRep++;      continue; }
-    if (WEEKLY_SENTINELS.has(rep))     { skippedSentinel++;   continue; }
-    if (!isKnownRep(rep))              { skippedUnknownRep++; continue; }
+    // Stop at daily activity header: Rep | Date | Dials | Texts
+    if (col0 === 'Rep' && col1 === 'Date' && col3 === 'Dials') {
+      console.log(`[parseCloseLog] Activity header found at row index ${i} — stopping`);
+      break;
+    }
 
-    const date = parseDate(row[1]);
-    if (!date)                         { skippedNoDate++;     continue; }
+    total++;
 
-    if (!isRevenueCell(row[2]))        { skippedNoRevenue++;  continue; }
+    if (!col0) { skippedEmpty++; continue; }
+
+    const date = parseDate(col1);
+    if (!date) { skippedDate++; continue; }
+
+    const revenue = parseRevenue(row[2]);
+    if (!revenue) { skippedRevenue++; continue; }
 
     results.push({
-      rep_name:    rep,
+      rep_name:    col0,
       close_date:  date,
-      revenue:     parseRevenue(row[2]),
+      revenue,
       lead_source: (row[3] || '').trim() || null,
       location:    (row[4] || '').trim() || null,
     });
   }
 
   console.log(
-    `[parseCloseLog] Parsed ${results.length} closes. ` +
-    `Skipped: empty=${skippedNoRep}, sentinel=${skippedSentinel}, ` +
-    `unknown-rep=${skippedUnknownRep}, no-date=${skippedNoDate}, no-revenue=${skippedNoRevenue}`
+    `[parseCloseLog] Parsed ${results.length} closes from ${total} rows. ` +
+    `Skipped: empty=${skippedEmpty}, bad-date=${skippedDate}, no-revenue=${skippedRevenue}`
   );
 
   return results;
 }
+
+// ─── parseMonthlyTotals ──────────────────────────────────────────────────────
+
+// Finds the "Huracan Nero Auto Spa" section and reads month-labeled rows.
+// Each month row has: Rep Name | Dials | Texts | Closes | Revenue
+// Stored in rep_weekly_stats with week_start = first day of that month.
+const MONTH_NAMES = {
+  january: '01', february: '02', march: '03', april: '04',
+  may: '05', june: '06', july: '07', august: '08',
+  september: '09', october: '10', november: '11', december: '12',
+};
+
+function parseMonthlyTotals(rows) {
+  const results = [];
+
+  // Find the "Huracan Nero Auto Spa" sentinel
+  let sectionStart = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if ((rows[i][0] || '').trim() === 'Huracan Nero Auto Spa') {
+      sectionStart = i + 1;
+      console.log(`[parseMonthlyTotals] Section found at row index ${i}`);
+      break;
+    }
+  }
+
+  if (sectionStart === -1) {
+    console.warn('[parseMonthlyTotals] "Huracan Nero Auto Spa" section not found');
+    return [];
+  }
+
+  // Current year — monthly totals are assumed to be for the current year
+  const year = new Date().getFullYear();
+
+  for (let i = sectionStart; i < rows.length; i++) {
+    const row  = rows[i];
+    const col0 = (row[0] || '').trim();
+
+    // Stop when we hit another section or known sentinel
+    if (!col0) continue;
+    if (col0 === 'Rep Name' || col0 === 'Rep' || col0 === 'TOTAL') break;
+
+    // Match month names (case-insensitive)
+    const monthKey = col0.toLowerCase();
+    const monthNum = MONTH_NAMES[monthKey];
+
+    if (!monthNum) continue; // not a month row — skip
+
+    // Col layout: Month | Dials | Texts | Closes | Revenue
+    const dials   = parseInt(row[1], 10) || 0;
+    const texts   = parseInt(row[2], 10) || 0;
+    const closes  = parseInt(row[3], 10) || 0;
+    const revenue = parseRevenue(row[4]);
+
+    if (!dials && !texts && !closes && !revenue) continue;
+
+    const weekStart = `${year}-${monthNum}-01`;
+    // Last day of the month
+    const lastDay   = new Date(year, parseInt(monthNum, 10), 0).getDate();
+    const weekEnd   = `${year}-${monthNum}-${String(lastDay).padStart(2, '0')}`;
+
+    results.push({
+      rep_name:     'Huracan Nero Auto Spa',
+      week_start:   weekStart,
+      week_end:     weekEnd,
+      dials,
+      texts,
+      closes,
+      revenue,
+      lead_sources: null,
+      locations:    null,
+    });
+  }
+
+  console.log(`[parseMonthlyTotals] Parsed ${results.length} monthly total rows`);
+  return results;
+}
+
+// ─── parseDailyActivity ──────────────────────────────────────────────────────
 
 // KPI_RAW sheet: Rep | Date | Dials | Texts
 function parseDailyActivity(rows) {
@@ -169,9 +243,6 @@ function parseDailyActivity(rows) {
 
 // ─── fetchParsed (debug — no DB writes) ──────────────────────────────────────
 
-// Fetches both sheets and returns the parsed data without writing anything to
-// the database. Used by GET /api/sales/debug-sync so parsing can be verified
-// in production without affecting live data.
 async function fetchParsed() {
   const [weeklyRows, activityRows] = await Promise.all([
     sheetsGet('Weekly Summary!A1:Z2000'),
@@ -179,11 +250,11 @@ async function fetchParsed() {
   ]);
 
   return {
-    weekly_stats: parseWeeklyStats(weeklyRows),
-    closes:       parseCloseLog(weeklyRows),
-    activity:     parseDailyActivity(activityRows),
-    // Raw sample so the caller can see exactly what Google Sheets returned
-    raw_weekly_sample: weeklyRows.slice(0, 30),
+    weekly_stats:    parseWeeklyStats(weeklyRows),
+    monthly_totals:  parseMonthlyTotals(weeklyRows),
+    closes:          parseCloseLog(weeklyRows),
+    activity:        parseDailyActivity(activityRows),
+    raw_weekly_sample: weeklyRows.slice(0, 40),
   };
 }
 
@@ -203,15 +274,16 @@ async function syncSheetsData() {
     return summary;
   }
 
-  const weeklyStats = parseWeeklyStats(weeklyRows);
-  const closes      = parseCloseLog(weeklyRows);
-  const activity    = parseDailyActivity(activityRows);
-  const now         = new Date().toISOString();
+  const weeklyStats    = parseWeeklyStats(weeklyRows);
+  const monthlyTotals  = parseMonthlyTotals(weeklyRows);
+  const closes         = parseCloseLog(weeklyRows);
+  const activity       = parseDailyActivity(activityRows);
+  const now            = new Date().toISOString();
 
   try {
     await db.transaction(async (tx) => {
-      // Weekly stats: upsert by (rep_name, week_start)
-      for (const row of weeklyStats) {
+      // Weekly stats + monthly totals: upsert by (rep_name, week_start)
+      for (const row of [...weeklyStats, ...monthlyTotals]) {
         await tx.run(
           `INSERT INTO rep_weekly_stats
              (rep_name, week_start, week_end, dials, texts, closes, revenue, lead_sources, locations, synced_at)
@@ -232,8 +304,6 @@ async function syncSheetsData() {
       }
 
       // Closes: non-destructive upsert keyed on (rep_name, close_date, revenue).
-      // DO NOTHING preserves closes that were imported in previous syncs and
-      // are no longer present in the current sheet window.
       for (const row of closes) {
         const { lastId } = await tx.run(
           `INSERT INTO rep_closes (rep_name, close_date, revenue, lead_source, location, synced_at)
