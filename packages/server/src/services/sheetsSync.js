@@ -35,10 +35,13 @@ function parseRevenue(str) {
 
 // ─── parsers ─────────────────────────────────────────────────────────────────
 
+const WEEKLY_SENTINELS = new Set(['', 'Rep Name', 'TOTAL', 'END', 'Huracan Nero Auto Spa']);
+
 // Weekly Summary sheet:
-//   Date-range label row  → "04/13-04/19" in col A (skip, dates come from next row)
-//   Header row            → "Rep Name" in col A; cols J/K hold actual ISO start/end dates
-//   Rep data rows         → rep_name, dials, texts, closes, revenue, lead_sources, locations
+//   Date-range label row  → "04/13-04/19" in col A (skip)
+//   Header row            → "Rep Name" in col A; cols J/K hold ISO start/end dates
+//   Rep data rows         → rep_name, dials, texts (col 1 is an integer, not a date)
+//   Close log rows        → col[1] is a valid full date — skip here, parsed by parseCloseLog
 //   Sentinel rows         → "TOTAL", "END", blank — all skipped
 function parseWeeklyStats(rows) {
   const results = [];
@@ -54,47 +57,46 @@ function parseWeeklyStats(rows) {
       continue;
     }
 
-    if (!cell0
-      || cell0 === 'TOTAL'
-      || cell0 === 'END'
-      || cell0 === 'Huracan Nero Auto Spa'
-      || /^\d{2}\/\d{2}-\d{2}\/\d{2}$/.test(cell0)
-    ) continue;
+    if (WEEKLY_SENTINELS.has(cell0) || /^\d{2}\/\d{2}-\d{2}\/\d{2}$/.test(cell0)) continue;
+
+    // Close log rows have a full date in col[1] — skip them here
+    if (parseDate(row[1])) continue;
 
     if (!weekStart) continue;
 
     results.push({
-      rep_name:    cell0,
-      week_start:  weekStart,
-      week_end:    weekEnd,
-      dials:       parseInt(row[1], 10) || 0,
-      texts:       parseInt(row[2], 10) || 0,
-      closes:      parseInt(row[3], 10) || 0,
-      revenue:     parseRevenue(row[4]),
+      rep_name:     cell0,
+      week_start:   weekStart,
+      week_end:     weekEnd,
+      dials:        parseInt(row[1], 10) || 0,
+      texts:        parseInt(row[2], 10) || 0,
+      closes:       parseInt(row[3], 10) || 0,
+      revenue:      parseRevenue(row[4]),
       lead_sources: row[5] || null,
-      locations:   row[6] || null,
+      locations:    row[6] || null,
     });
   }
 
   return results;
 }
 
-// SALES_RAW sheet: Rep | Date | Revenue | Lead Source | Location
-// Row 0 is the header — skip it.
-function parseCloses(rows) {
+// Close log section at the bottom of the Weekly Summary sheet:
+//   Rep | Date | Revenue | Lead Source | Location
+// A close log row is identified by col[1] being a valid full date (M/D/YYYY).
+// This works for all weeks/months as long as new rows follow the same format.
+function parseCloseLog(rows) {
   const results = [];
-  for (let i = 1; i < rows.length; i++) {
-    const row  = rows[i];
-    const rep  = (row[0] || '').trim();
-    if (!rep || rep === 'Rep') continue;
+  for (const row of rows) {
+    const rep = (row[0] || '').trim();
+    if (!rep || WEEKLY_SENTINELS.has(rep)) continue;
     const date = parseDate(row[1]);
-    if (!date) continue;
+    if (!date) continue; // not a close log row (date range, header, weekly stat, etc.)
     results.push({
       rep_name:    rep,
       close_date:  date,
       revenue:     parseRevenue(row[2]),
-      lead_source: row[3] || null,
-      location:    row[4] || null,
+      lead_source: (row[3] || '').trim() || null,
+      location:    (row[4] || '').trim() || null,
     });
   }
   return results;
@@ -128,12 +130,10 @@ function parseDailyActivity(rows) {
 async function syncSheetsData() {
   const summary = { weekly: 0, closes: 0, activity: 0, errors: [] };
 
-  let weeklyRows, closesRows, activityRows;
+  let weeklyRows, activityRows;
   try {
-    // Google Sheets API allows parallel requests (unlike OrbisX)
-    [weeklyRows, closesRows, activityRows] = await Promise.all([
+    [weeklyRows, activityRows] = await Promise.all([
       sheetsGet('Weekly Summary!A1:Z2000'),
-      sheetsGet('SALES_RAW!A1:Z2000'),
       sheetsGet('KPI_RAW!A1:Z2000'),
     ]);
   } catch (err) {
@@ -141,8 +141,10 @@ async function syncSheetsData() {
     return summary;
   }
 
+  // Both weekly stats and close log come from the same Weekly Summary sheet.
+  // Weekly stat rows: col[1] is dials (integer). Close log rows: col[1] is a full date.
   const weeklyStats = parseWeeklyStats(weeklyRows);
-  const closes      = parseCloses(closesRows);
+  const closes      = parseCloseLog(weeklyRows);
   const activity    = parseDailyActivity(activityRows);
 
   const db  = getDb();

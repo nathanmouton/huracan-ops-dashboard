@@ -170,8 +170,8 @@ function LeadSourcesDonut({ leadSources }) {
 
 // ─── ALWAYS-VISIBLE strip ─────────────────────────────────────────────────────
 
-function SummaryStrip({ totals, weekTotals, todayTotals }) {
-  const monthName = FULL_MONTHS[new Date().getMonth()];
+function SummaryStrip({ totals, weekTotals, todayTotals, selectedMonth }) {
+  const monthName = fmtMonthShort(selectedMonth) || MONTHS[new Date().getMonth()];
   return (
     <div className={styles.summaryStrip}>
       <span className={styles.stripSegment}>
@@ -523,12 +523,18 @@ function MonthlyBreakdownTable({ breakdown }) {
   );
 }
 
+function getCurrentMonth() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function Sales() {
   const [data, setData]                   = useState(null);
   const [todayData, setTodayData]         = useState(null);
   const [annualData, setAnnualData]       = useState(null);
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
   const [expandedWeeks, setExpandedWeeks] = useState(new Set());
   const [syncing, setSyncing]             = useState(false);
   const [lastSynced, setLastSynced]       = useState(null);
@@ -538,30 +544,50 @@ export default function Sales() {
   const weeklyRef  = useRef(null);
   const annualRef  = useRef(null);
 
-  async function load() {
-    const today = localDateStr();
-    try {
-      const [kpis, td, annual] = await Promise.all([
-        getSalesKPIs(),
-        getSalesToday(today),
-        getSalesAnnual(),
-      ]);
+  function prevMonth() {
+    setSelectedMonth(m => {
+      const [y, mo] = m.split('-').map(Number);
+      const d = new Date(y, mo - 2, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    });
+  }
+
+  function nextMonth() {
+    setSelectedMonth(m => {
+      if (m >= getCurrentMonth()) return m;
+      const [y, mo] = m.split('-').map(Number);
+      const d = new Date(y, mo, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    });
+  }
+
+  // Reload KPIs whenever selected month changes
+  useEffect(() => {
+    getSalesKPIs(selectedMonth).then(kpis => {
       setData(kpis);
-      setTodayData(td);
-      setAnnualData(annual);
       setLastSynced(new Date());
+      const today = localDateStr();
       if (kpis.weekly_data?.length) {
         const curr = kpis.weekly_data.find(w => w.week_start <= today && w.week_end >= today);
         if (curr) setExpandedWeeks(new Set([curr.week_start]));
       }
-    } catch (err) {
-      console.error('Sales fetch error:', err);
-    }
-  }
+    }).catch(err => console.error('KPI fetch error:', err));
+  }, [selectedMonth]);
 
+  // Today + annual data: loaded on mount and polled independently
   useEffect(() => {
-    load();
-    const timer = setInterval(load, POLL_MS);
+    async function loadStatic() {
+      const today = localDateStr();
+      try {
+        const [td, annual] = await Promise.all([getSalesToday(today), getSalesAnnual()]);
+        setTodayData(td);
+        setAnnualData(annual);
+      } catch (err) {
+        console.error('Static fetch error:', err);
+      }
+    }
+    loadStatic();
+    const timer = setInterval(loadStatic, POLL_MS);
     return () => clearInterval(timer);
   }, []);
 
@@ -589,7 +615,16 @@ export default function Sales() {
     setSyncing(true);
     try {
       await triggerSalesSync();
-      await load();
+      const today = localDateStr();
+      const [kpis, td, annual] = await Promise.all([
+        getSalesKPIs(selectedMonth),
+        getSalesToday(today),
+        getSalesAnnual(),
+      ]);
+      setData(kpis);
+      setTodayData(td);
+      setAnnualData(annual);
+      setLastSynced(new Date());
     } catch (err) {
       console.error('Sync error:', err);
     } finally {
@@ -606,12 +641,11 @@ export default function Sales() {
   // ─── derived ──────────────────────────────────────────────────────────────────
 
   const todayStr     = localDateStr();
-  const totals       = data?.totals        ?? {};
+  const totals       = data?.totals         ?? {};
   const monthlyByRep = data?.monthly_by_rep ?? [];
   const weekGroups   = groupByWeek(data?.weekly_data ?? []);
   const leadSources  = data?.lead_sources   ?? [];
   const locations    = data?.locations      ?? [];
-  const recentCloses = data?.recent_closes  ?? [];
 
   const currentWeek      = weekGroups.find(wk => todayStr >= wk.week_start && todayStr <= wk.week_end);
   const currentWeekReps  = currentWeek?.reps ?? [];
@@ -692,7 +726,7 @@ export default function Sales() {
       </div>
 
       {/* ── Always-visible summary strip ── */}
-      <SummaryStrip totals={totals} weekTotals={weekTotals} todayTotals={todayTotals} />
+      <SummaryStrip totals={totals} weekTotals={weekTotals} todayTotals={todayTotals} selectedMonth={selectedMonth} />
 
       {/* ════════════════════════════════════════════════════════════
           MONTHLY
@@ -700,7 +734,11 @@ export default function Sales() {
       <section ref={monthlyRef} className={styles.section}>
         <div className={styles.sectionHeader}>
           <span className={styles.sectionTitle}>Monthly</span>
-          <span className={styles.sectionDate}>{FULL_MONTHS[new Date().getMonth()]} {new Date().getFullYear()}</span>
+          <div className={styles.monthNav}>
+            <button className={styles.monthNavBtn} onClick={prevMonth}>‹</button>
+            <span className={styles.sectionDate}>{fmtMonthFull(selectedMonth)}</span>
+            <button className={styles.monthNavBtn} onClick={nextMonth} disabled={selectedMonth >= getCurrentMonth()}>›</button>
+          </div>
         </div>
 
         <MonthlyKPIStrip totals={totals} />
@@ -759,43 +797,6 @@ export default function Sales() {
 
         </div>
 
-        <p className={styles.sectionLabel}>Recent Activity</p>
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Rep</th>
-                <th>Date</th>
-                <th className={styles.num}>Revenue</th>
-                <th>Lead Source</th>
-                <th>Location</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentCloses.length === 0
-                ? <tr><td colSpan={5} className={styles.empty}>No data</td></tr>
-                : recentCloses.map((c, i) => (
-                  <tr key={i}>
-                    <td><span className={styles.repDot} style={{ background: repColor(c.rep_name) }} />{c.rep_name}</td>
-                    <td style={{ color: 'var(--text-muted)' }}>{fmtDate(c.close_date)}</td>
-                    <td className={styles.num}>{fmtUSD.format(c.revenue)}</td>
-                    <td style={{ color: 'var(--text-muted)' }}>{c.lead_source || '—'}</td>
-                    <td style={{ color: 'var(--text-muted)' }}>{c.location || '—'}</td>
-                  </tr>
-                ))
-              }
-            </tbody>
-            {recentCloses.length > 0 && (
-              <tfoot>
-                <tr className={styles.closesTotalRow}>
-                  <td colSpan={2} style={{ color: 'var(--text-muted)', fontSize: 11 }}>{recentCloses.length} closes shown</td>
-                  <td className={styles.num}>{fmtUSD.format(recentCloses.reduce((s, c) => s + c.revenue, 0))}</td>
-                  <td colSpan={2} />
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
       </section>
 
       <div className={styles.sectionBreak} />

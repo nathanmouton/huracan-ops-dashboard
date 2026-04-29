@@ -130,6 +130,33 @@
   color: var(--text-muted);
 }
 
+/* ── month navigation (prev/next arrows) ──────────────────────── */
+.monthNav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.monthNavBtn {
+  padding: 2px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.monthNavBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.monthNavBtn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .emptyState {
   background: var(--surface);
   border: 1px solid var(--border);

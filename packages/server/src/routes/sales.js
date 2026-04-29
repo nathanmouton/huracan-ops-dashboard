@@ -15,46 +15,64 @@ const REP_GOAL = 100000;
 router.get('/kpis', (req, res) => {
   const db = getDb();
 
-  // Top-line totals
+  // Default to current calendar month; caller can pass ?month=2026-04
+  const month = (req.query.month || '').match(/^\d{4}-\d{2}$/)
+    ? req.query.month
+    : new Date().toISOString().slice(0, 7);
+
+  // Top-line totals — revenue/closes always from rep_closes (close log)
   const closeTotals = db.prepare(`
     SELECT COUNT(*) AS closes, COALESCE(SUM(revenue), 0) AS revenue
     FROM rep_closes
-    WHERE strftime('%Y-%m', close_date) = strftime('%Y-%m', 'now')
-  `).get();
+    WHERE strftime('%Y-%m', close_date) = ?
+  `).get(month);
 
   const activityTotals = db.prepare(`
     SELECT COALESCE(SUM(dials), 0) AS dials, COALESCE(SUM(texts), 0) AS texts
     FROM rep_weekly_stats
-    WHERE strftime('%Y-%m', week_start) = strftime('%Y-%m', 'now')
-  `).get();
+    WHERE strftime('%Y-%m', week_start) = ?
+  `).get(month);
 
-  // Per-rep monthly summary with goal %
-  const monthlyByRepRaw = db.prepare(`
-    SELECT
-      rep_name,
-      SUM(dials)   AS dials,
-      SUM(texts)   AS texts,
-      SUM(closes)  AS closes,
-      SUM(revenue) AS revenue
+  // Per-rep: dials/texts from rep_weekly_stats, closes/revenue from rep_closes
+  const actPerRep = db.prepare(`
+    SELECT rep_name,
+      COALESCE(SUM(dials), 0) AS dials,
+      COALESCE(SUM(texts), 0) AS texts
     FROM rep_weekly_stats
-    WHERE strftime('%Y-%m', week_start) = strftime('%Y-%m', 'now')
+    WHERE strftime('%Y-%m', week_start) = ?
     GROUP BY rep_name
-    ORDER BY revenue DESC
-  `).all();
+  `).all(month);
 
-  const monthlyByRep = monthlyByRepRaw.map((r) => ({
-    ...r,
-    goal:     REP_GOAL,
-    goal_pct: Math.min(Math.round((r.revenue / REP_GOAL) * 100), 100),
-  }));
+  const closesPerRep = db.prepare(`
+    SELECT rep_name,
+      COUNT(*)                  AS closes,
+      COALESCE(SUM(revenue), 0) AS revenue
+    FROM rep_closes
+    WHERE strftime('%Y-%m', close_date) = ?
+    GROUP BY rep_name
+  `).all(month);
 
-  // All weekly rows for current month
+  // Merge: every rep seen in either table
+  const repMap = {};
+  for (const r of actPerRep) {
+    repMap[r.rep_name] = { rep_name: r.rep_name, dials: r.dials, texts: r.texts, closes: 0, revenue: 0 };
+  }
+  for (const r of closesPerRep) {
+    if (!repMap[r.rep_name]) repMap[r.rep_name] = { rep_name: r.rep_name, dials: 0, texts: 0, closes: 0, revenue: 0 };
+    repMap[r.rep_name].closes  = r.closes;
+    repMap[r.rep_name].revenue = r.revenue;
+  }
+  const monthlyByRep = Object.values(repMap)
+    .map((r) => ({ ...r, goal: REP_GOAL, goal_pct: Math.min(Math.round((r.revenue / REP_GOAL) * 100), 100) }))
+    .sort((a, b) => b.revenue - a.revenue);
+
+  // All weekly rows for selected month
   const weeklyData = db.prepare(`
     SELECT rep_name, week_start, week_end, dials, texts, closes, revenue
     FROM rep_weekly_stats
-    WHERE strftime('%Y-%m', week_start) = strftime('%Y-%m', 'now')
+    WHERE strftime('%Y-%m', week_start) = ?
     ORDER BY week_start ASC, revenue DESC
-  `).all();
+  `).all(month);
 
   // Lead sources
   const leadSources = db.prepare(`
@@ -63,10 +81,10 @@ router.get('/kpis', (req, res) => {
       COUNT(*)                         AS closes,
       COALESCE(SUM(revenue), 0)        AS revenue
     FROM rep_closes
-    WHERE strftime('%Y-%m', close_date) = strftime('%Y-%m', 'now')
+    WHERE strftime('%Y-%m', close_date) = ?
     GROUP BY lead_source
     ORDER BY closes DESC
-  `).all();
+  `).all(month);
 
   // Locations with goal
   const locationsRaw = db.prepare(`
@@ -75,41 +93,34 @@ router.get('/kpis', (req, res) => {
       COUNT(*)                      AS closes,
       COALESCE(SUM(revenue), 0)     AS revenue
     FROM rep_closes
-    WHERE strftime('%Y-%m', close_date) = strftime('%Y-%m', 'now')
+    WHERE strftime('%Y-%m', close_date) = ?
     GROUP BY location
     ORDER BY closes DESC
-  `).all();
+  `).all(month);
 
   const locations = locationsRaw.map((l) => {
     const goal = LOCATION_GOALS[l.location] || 100000;
     return {
       ...l,
       goal,
-      goal_pct: Math.min(Math.round((l.revenue / goal) * 100), 100),
+      goal_pct:  Math.min(Math.round((l.revenue / goal) * 100), 100),
       remaining: Math.max(0, goal - l.revenue),
     };
   });
 
-  // Last 20 closes
-  const recentCloses = db.prepare(`
-    SELECT rep_name, close_date, revenue, lead_source, location
-    FROM rep_closes
-    ORDER BY close_date DESC, rowid DESC
-    LIMIT 20
-  `).all();
-
-  // 7-day sparkline data — raw rows, frontend fills date spine
+  // Sparkline data for the selected month — frontend filters to the active week range
   const sparklinesRaw = db.prepare(`
     SELECT rep_name, close_date, COALESCE(SUM(revenue), 0) AS revenue
     FROM rep_closes
-    WHERE close_date >= date('now', '-6 days')
+    WHERE strftime('%Y-%m', close_date) = ?
     GROUP BY rep_name, close_date
     ORDER BY rep_name, close_date
-  `).all();
+  `).all(month);
 
   db.close();
 
   res.json({
+    month,
     totals: {
       closes:  closeTotals.closes,
       revenue: closeTotals.revenue,
@@ -121,7 +132,6 @@ router.get('/kpis', (req, res) => {
     weekly_data:    weeklyData,
     lead_sources:   leadSources,
     locations,
-    recent_closes:  recentCloses,
     sparklines_raw: sparklinesRaw,
   });
 });
