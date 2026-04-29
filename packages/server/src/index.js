@@ -1,6 +1,6 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../../.env') });
 const express = require('express');
-const { getDb, initSchema } = require('../db/schema');
+const { initSchema }  = require('../db/schema');
 const healthRouter    = require('./routes/health');
 const importRouter    = require('./routes/import');
 const locationsRouter = require('./routes/locations');
@@ -11,10 +11,6 @@ const salesRouter     = require('./routes/sales');
 const { startScheduler } = require('./services/scheduler');
 
 const PORT = process.env.PORT || 3001;
-
-const db = getDb();
-initSchema(db);
-db.close();
 
 const app = express();
 app.use(express.json());
@@ -27,8 +23,6 @@ app.use('/api/webhooks',     webhooksRouter);
 app.use('/api/sync',         syncRouter);
 app.use('/api/sales',        salesRouter);
 
-startScheduler();
-
 if (process.env.NODE_ENV === 'production') {
   const clientBuild = require('path').join(__dirname, '../../client/dist');
   app.use(express.static(clientBuild));
@@ -39,6 +33,15 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`Huracan server running on http://localhost:${PORT}`);
-});
+(async () => {
+  try {
+    await initSchema();
+    startScheduler();
+    app.listen(PORT, () => {
+      console.log(`Huracan server running on http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error('Startup failed:', err);
+    process.exit(1);
+  }
+})();

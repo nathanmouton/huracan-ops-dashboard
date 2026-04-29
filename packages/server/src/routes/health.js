@@ -1,14 +1,12 @@
 const { Router } = require('express');
-const { getDb } = require('../../db/schema');
+const db = require('../../db/schema');
 
 const router = Router();
 
-router.get('/health', (req, res) => {
+router.get('/health', async (_req, res) => {
   try {
-    const db = getDb();
-    const { ts } = db.prepare("SELECT datetime('now') as ts").get();
-    db.close();
-    res.json({ status: 'ok', db_time: ts });
+    const row = await db.queryOne('SELECT CURRENT_TIMESTAMP AS ts');
+    res.json({ status: 'ok', db_time: row.ts });
   } catch (err) {
     res.status(503).json({ status: 'error', message: err.message });
   }

@@ -1,13 +1,15 @@
 const { Router } = require('express');
-const { getDb } = require('../../db/schema');
+const db = require('../../db/schema');
 
 const router = Router();
 
-router.get('/', (_req, res) => {
-  const db = getDb();
-  const rows = db.prepare('SELECT id, name, city FROM locations ORDER BY id').all();
-  db.close();
-  res.json(rows);
+router.get('/', async (_req, res) => {
+  try {
+    const rows = await db.query('SELECT id, name, city FROM locations ORDER BY id');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
