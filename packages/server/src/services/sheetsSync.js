@@ -1,339 +1,324 @@
-const fetch = require('node-fetch');
-const db = require('../../db/schema');
+'use strict';
 
-const BASE_URL = 'https://sheets.googleapis.com/v4/spreadsheets';
-const SHEET_ID = () => process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
-const API_KEY  = () => process.env.GOOGLE_SHEETS_API_KEY;
+const { google } = require('googleapis');
+const pool = require('../db');
 
-// ─── API client ──────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// CONFIG
+// ─────────────────────────────────────────────
+const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+const API_KEY        = process.env.GOOGLE_SHEETS_API_KEY;
 
-async function sheetsGet(range) {
-  const url = `${BASE_URL}/${SHEET_ID()}/values/${encodeURIComponent(range)}?key=${API_KEY()}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Sheets "${range}" → ${res.status}: ${await res.text()}`);
-  const data = await res.json();
-  return data.values || [];
+const TABS = {
+  closes:         'closes',
+  daily_activity: 'daily_activity',
+  pipeline:       'pipeline',
+};
+
+// Canonical rep names — must match exactly what's in the reps table
+const REP_NAME_MAP = {
+  'alex martinez':      'Alex Martinez',
+  'rodrigo lopez':      'Rodrigo Lopez',
+  'jahmad lumar':       'Jahmad Lumar',
+  'alejandro ramirez':  'Alejandro Ramirez',
+  'jacob hernandez':    'Jacob Hernandez',
+  'gage weiser':        'Gage Weiser',
+};
+
+// Lead source normalization map
+const LEAD_SOURCE_MAP = {
+  'meta':         'Meta',
+  'website':      'Website',
+  'google':       'Google',
+  'referral':     'Referral',
+  'repeat client':'Repeat Client',
+  'walk in':      'Walk In',
+  'walkin':       'Walk In',
+  'phone call':   'Phone Call',
+  'phone':        'Phone Call',
+  'dm':           'DM',
+  'ai':           'Other',
+  'other':        'Other',
+};
+
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+
+/**
+ * Convert a Google Sheets / Excel serial date number to a JS Date.
+ * Sheets epoch: Dec 30 1899
+ */
+function serialToDate(serial) {
+  if (!serial && serial !== 0) return null;
+  const num = typeof serial === 'string' ? parseFloat(serial) : serial;
+  if (isNaN(num) || num <= 0) return null;
+  const date = new Date(Date.UTC(1899, 11, 30) + Math.round(num) * 86400000);
+  return isNaN(date.getTime()) ? null : date;
 }
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-// "4/13/2026" → "2026-04-13". Returns null for blank or malformed.
-function parseDate(str) {
-  if (!str) return null;
-  const m = String(str).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!m) return null;
-  const year = parseInt(m[3], 10);
-  if (year < 2024 || year > 2027) return null;
-  return `${year}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`;
+/**
+ * Parse revenue — numbers only, never from daily activity.
+ * Strips $, commas, and any trailing text like "(25%)".
+ * Returns null if unparseable.
+ */
+function parseRevenue(raw) {
+  if (raw === null || raw === undefined || raw === '' || raw === '-') return null;
+  const str = String(raw).replace(/[$,]/g, '').trim();
+  // Extract leading numeric portion only
+  const match = str.match(/^(\d+(\.\d+)?)/);
+  if (!match) return null;
+  const val = parseFloat(match[1]);
+  return isNaN(val) ? null : val;
 }
 
-// "$14,034.00" or "14034" → 14034
-function parseRevenue(str) {
-  if (!str) return 0;
-  return parseFloat(String(str).replace(/[$,\s]/g, '')) || 0;
+/**
+ * Parse an integer field (dials, texts, closes, conversations).
+ */
+function parseInt2(raw) {
+  if (raw === null || raw === undefined || raw === '' || raw === '-') return 0;
+  const val = parseInt(String(raw).replace(/[^0-9-]/g, ''), 10);
+  return isNaN(val) ? 0 : val;
 }
 
-// ─── parseWeeklyStats ────────────────────────────────────────────────────────
+/**
+ * Normalize rep name to canonical form.
+ */
+function normalizeRepName(raw) {
+  if (!raw) return null;
+  const key = String(raw).toLowerCase().trim();
+  return REP_NAME_MAP[key] || null;
+}
 
-// Weekly Summary sheet — reads dials/texts from weekly table blocks.
-// Skips rows where col[1] is a valid full date (those are close log rows).
-const WEEKLY_SENTINELS = new Set(['', 'Rep Name', 'TOTAL', 'END', 'Huracan Nero Auto Spa']);
+/**
+ * Normalize lead source to canonical form.
+ */
+function normalizeLeadSource(raw) {
+  if (!raw) return 'Other';
+  const key = String(raw).toLowerCase().trim();
+  return LEAD_SOURCE_MAP[key] || 'Other';
+}
 
-function parseWeeklyStats(rows) {
-  const results = [];
-  let weekStart = null;
-  let weekEnd   = null;
+/**
+ * Fetch all rows from a named tab.
+ * Returns array of row arrays (strings/numbers).
+ */
+async function fetchTab(sheets, tabName) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${tabName}!A1:Z2000`,
+    key: API_KEY,
+  });
+  const rows = res.data.values || [];
+  if (rows.length < 2) return { headers: [], data: [] };
+  const headers = rows[0].map(h => String(h).toLowerCase().trim().replace(/\s+/g, '_'));
+  const data = rows.slice(1);
+  return { headers, data };
+}
 
-  for (const row of rows) {
-    const cell0 = (row[0] || '').trim();
+/**
+ * Map a row array to an object using headers.
+ */
+function rowToObj(headers, row) {
+  const obj = {};
+  headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? row[i] : null; });
+  return obj;
+}
 
-    if (cell0 === 'Rep Name') {
-      weekStart = parseDate(row[9]);
-      weekEnd   = parseDate(row[10]);
+/**
+ * Load reps from DB into a name→id map.
+ */
+async function loadRepMap() {
+  const { rows } = await pool.query('SELECT id, name FROM reps');
+  const map = {};
+  rows.forEach(r => { map[r.name] = r.id; });
+  return map;
+}
+
+// ─────────────────────────────────────────────
+// SYNC CLOSES
+// Revenue ONLY comes from the closes tab.
+// Never from daily_activity.
+// ─────────────────────────────────────────────
+async function syncCloses(sheets, repMap) {
+  const { headers, data } = await fetchTab(sheets, TABS.closes);
+  console.log(`[sheetsSync] closes tab: ${data.length} rows read`);
+
+  let upserted = 0;
+  let skipped  = 0;
+
+  for (const row of data) {
+    const obj = rowToObj(headers, row);
+
+    const repName = normalizeRepName(obj.rep_name);
+    if (!repName) { skipped++; continue; }
+
+    const repId = repMap[repName];
+    if (!repId) { skipped++; continue; }
+
+    // Date from serial
+    const saleDate = serialToDate(obj.sale_date);
+    if (!saleDate) { skipped++; continue; }
+
+    // Revenue ONLY from closes tab column — never daily activity
+    const revenue = parseRevenue(obj.revenue);
+    if (revenue === null) { skipped++; continue; }
+
+    const weekStart   = serialToDate(obj.week_start);
+    const leadSource  = normalizeLeadSource(obj.lead_source);
+    const location    = obj.location    ? String(obj.location).trim()    : null;
+    const dealType    = obj.deal_type   ? String(obj.deal_type).trim()   : null;
+    const bookingStatus = obj.booking_status ? String(obj.booking_status).trim() : null;
+
+    await pool.query(
+      `INSERT INTO rep_closes
+         (rep_id, sale_date, revenue, lead_source, location, booking_status, deal_type, week_start)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (rep_id, sale_date, revenue, lead_source, location)
+         DO UPDATE SET
+           booking_status = EXCLUDED.booking_status,
+           deal_type      = EXCLUDED.deal_type,
+           week_start     = EXCLUDED.week_start`,
+      [repId, saleDate, revenue, leadSource, location, bookingStatus, dealType, weekStart]
+    );
+    upserted++;
+  }
+
+  console.log(`[sheetsSync] closes: ${upserted} upserted, ${skipped} skipped`);
+  return upserted;
+}
+
+// ─────────────────────────────────────────────
+// SYNC DAILY ACTIVITY
+// NO revenue stored here — effort metrics only.
+// ─────────────────────────────────────────────
+async function syncDailyActivity(sheets, repMap) {
+  const { headers, data } = await fetchTab(sheets, TABS.daily_activity);
+  console.log(`[sheetsSync] daily_activity tab: ${data.length} rows read`);
+
+  let upserted = 0;
+  let skipped  = 0;
+
+  for (const row of data) {
+    const obj = rowToObj(headers, row);
+
+    const repName = normalizeRepName(obj.rep_name);
+    if (!repName) { skipped++; continue; }
+
+    const repId = repMap[repName];
+    if (!repId) { skipped++; continue; }
+
+    const date  = serialToDate(obj.date);
+    if (!date)  { skipped++; continue; }
+
+    const dials         = parseInt2(obj.dials);
+    const texts         = parseInt2(obj.texts);
+    const conversations = parseInt2(obj.conversations);
+    const closes        = parseInt2(obj.closes);
+
+    // Skip entirely empty rows
+    if (dials === 0 && texts === 0 && conversations === 0 && closes === 0) {
+      skipped++;
       continue;
     }
 
-    if (WEEKLY_SENTINELS.has(cell0) || /^\d{2}\/\d{2}-\d{2}\/\d{2}$/.test(cell0)) continue;
+    // NOTE: revenue is intentionally NOT read or stored from this tab.
+    // All revenue comes from rep_closes only.
 
-    // Close log rows have a full date in col[1] — skip here
-    if (parseDate(row[1])) continue;
-
-    // Skip once we hit the close log header row
-    if (cell0 === 'Rep' && (row[1] || '').trim() === 'Date') continue;
-
-    if (!weekStart) continue;
-
-    results.push({
-      rep_name:     cell0,
-      week_start:   weekStart,
-      week_end:     weekEnd,
-      dials:        parseInt(row[1], 10) || 0,
-      texts:        parseInt(row[2], 10) || 0,
-      closes:       parseInt(row[3], 10) || 0,
-      revenue:      parseRevenue(row[4]),
-      lead_sources: row[5] || null,
-      locations:    row[6] || null,
-    });
+    await pool.query(
+      `INSERT INTO rep_daily_activity
+         (rep_id, date, dials, texts, conversations, closes)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (rep_id, date)
+         DO UPDATE SET
+           dials         = EXCLUDED.dials,
+           texts         = EXCLUDED.texts,
+           conversations = EXCLUDED.conversations,
+           closes        = EXCLUDED.closes`,
+      [repId, date, dials, texts, conversations, closes]
+    );
+    upserted++;
   }
 
-  return results;
+  console.log(`[sheetsSync] daily_activity: ${upserted} upserted, ${skipped} skipped`);
+  return upserted;
 }
 
-// ─── parseCloseLog ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// COMPUTE WEEKLY STATS
+// Revenue comes from rep_closes — never daily_activity.
+// Activity (dials/texts) comes from rep_daily_activity.
+// ─────────────────────────────────────────────
+async function computeWeeklyStats() {
+  // Revenue + closes per rep per week — sourced from rep_closes only
+  const closesRes = await pool.query(`
+    SELECT
+      rep_id,
+      week_start,
+      SUM(revenue)  AS revenue,
+      COUNT(*)      AS closes
+    FROM rep_closes
+    WHERE booking_status = 'Completed'
+      AND week_start IS NOT NULL
+    GROUP BY rep_id, week_start
+  `);
 
-// Scans for the close log header row: col[0]="Rep", col[1]="Date", col[2]="Revenue"
-// Reads entries until the daily activity header: col[0]="Rep", col[3]="Dials"
-function parseCloseLog(rows) {
-  // Find close log header
-  let closeStart = -1;
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
-    if (
-      (r[0] || '').trim() === 'Rep' &&
-      (r[1] || '').trim() === 'Date' &&
-      (r[2] || '').trim() === 'Revenue'
-    ) {
-      closeStart = i + 1;
-      console.log(`[parseCloseLog] Header found at row index ${i}`);
-      break;
-    }
+  let upserted = 0;
+
+  for (const row of closesRes.rows) {
+    // Activity for same rep + week range
+    const actRes = await pool.query(`
+      SELECT
+        COALESCE(SUM(dials), 0)  AS dials,
+        COALESCE(SUM(texts), 0)  AS texts
+      FROM rep_daily_activity
+      WHERE rep_id = $1
+        AND date >= $2
+        AND date <  $2::date + INTERVAL '7 days'
+    `, [row.rep_id, row.week_start]);
+
+    const dials = parseInt2(actRes.rows[0]?.dials);
+    const texts = parseInt2(actRes.rows[0]?.texts);
+
+    await pool.query(
+      `INSERT INTO rep_weekly_stats
+         (rep_id, week_start, revenue, closes, dials, texts)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (rep_id, week_start)
+         DO UPDATE SET
+           revenue = EXCLUDED.revenue,
+           closes  = EXCLUDED.closes,
+           dials   = EXCLUDED.dials,
+           texts   = EXCLUDED.texts`,
+      [row.rep_id, row.week_start, row.revenue, row.closes, dials, texts]
+    );
+    upserted++;
   }
 
-  if (closeStart === -1) {
-    console.warn('[parseCloseLog] Close log header not found — no closes parsed');
-    return [];
-  }
-
-  const results = [];
-  let skippedEmpty = 0, skippedDate = 0, skippedRevenue = 0, total = 0;
-
-  for (let i = closeStart; i < rows.length; i++) {
-    const row  = rows[i];
-    const col0 = (row[0] || '').trim();
-    const col1 = (row[1] || '').trim();
-    const col3 = (row[3] || '').trim();
-
-    // Stop at daily activity header: Rep | Date | Dials | Texts
-    if (col0 === 'Rep' && col1 === 'Date' && col3 === 'Dials') {
-      console.log(`[parseCloseLog] Activity header found at row index ${i} — stopping`);
-      break;
-    }
-
-    total++;
-
-    if (!col0) { skippedEmpty++; continue; }
-
-    const date = parseDate(col1);
-    if (!date) { skippedDate++; continue; }
-
-    const revenue = parseRevenue(row[2]);
-    if (!revenue) { skippedRevenue++; continue; }
-
-    results.push({
-      rep_name:    col0,
-      close_date:  date,
-      revenue,
-      lead_source: (row[3] || '').trim() || null,
-      location:    (row[4] || '').trim() || null,
-    });
-  }
-
-  console.log(
-    `[parseCloseLog] Parsed ${results.length} closes from ${total} rows. ` +
-    `Skipped: empty=${skippedEmpty}, bad-date=${skippedDate}, no-revenue=${skippedRevenue}`
-  );
-
-  return results;
+  console.log(`[sheetsSync] weekly_stats: ${upserted} upserted`);
+  return upserted;
 }
 
-// ─── parseMonthlyTotals ──────────────────────────────────────────────────────
-
-// Finds the "Huracan Nero Auto Spa" section and reads month-labeled rows.
-// Each month row has: Rep Name | Dials | Texts | Closes | Revenue
-// Stored in rep_weekly_stats with week_start = first day of that month.
-const MONTH_NAMES = {
-  january: '01', february: '02', march: '03', april: '04',
-  may: '05', june: '06', july: '07', august: '08',
-  september: '09', october: '10', november: '11', december: '12',
-};
-
-function parseMonthlyTotals(rows) {
-  const results = [];
-
-  // Find the "Huracan Nero Auto Spa" sentinel
-  let sectionStart = -1;
-  for (let i = 0; i < rows.length; i++) {
-    if ((rows[i][0] || '').trim() === 'Huracan Nero Auto Spa') {
-      sectionStart = i + 1;
-      console.log(`[parseMonthlyTotals] Section found at row index ${i}`);
-      break;
-    }
+// ─────────────────────────────────────────────
+// MAIN EXPORT
+// ─────────────────────────────────────────────
+async function syncSheets() {
+  if (!SPREADSHEET_ID) {
+    console.error('[sheetsSync] GOOGLE_SHEETS_SPREADSHEET_ID not set');
+    return;
   }
 
-  if (sectionStart === -1) {
-    console.warn('[parseMonthlyTotals] "Huracan Nero Auto Spa" section not found');
-    return [];
-  }
+  console.log('[sheetsSync] Starting full sync...');
 
-  // Current year — monthly totals are assumed to be for the current year
-  const year = new Date().getFullYear();
+  const sheets = google.sheets({ version: 'v4', auth: API_KEY });
+  const repMap = await loadRepMap();
+  console.log(`[sheetsSync] Loaded ${Object.keys(repMap).length} reps from DB`);
 
-  for (let i = sectionStart; i < rows.length; i++) {
-    const row  = rows[i];
-    const col0 = (row[0] || '').trim();
+  const closesCount   = await syncCloses(sheets, repMap);
+  const activityCount = await syncDailyActivity(sheets, repMap);
+  const weeklyCount   = await computeWeeklyStats();
 
-    // Stop when we hit another section or known sentinel
-    if (!col0) continue;
-    if (col0 === 'Rep Name' || col0 === 'Rep' || col0 === 'TOTAL') break;
-
-    // Match month names (case-insensitive)
-    const monthKey = col0.toLowerCase();
-    const monthNum = MONTH_NAMES[monthKey];
-
-    if (!monthNum) continue; // not a month row — skip
-
-    // Col layout: Month | Dials | Texts | Closes | Revenue
-    const dials   = parseInt(row[1], 10) || 0;
-    const texts   = parseInt(row[2], 10) || 0;
-    const closes  = parseInt(row[3], 10) || 0;
-    const revenue = parseRevenue(row[4]);
-
-    if (!dials && !texts && !closes && !revenue) continue;
-
-    const weekStart = `${year}-${monthNum}-01`;
-    // Last day of the month
-    const lastDay   = new Date(year, parseInt(monthNum, 10), 0).getDate();
-    const weekEnd   = `${year}-${monthNum}-${String(lastDay).padStart(2, '0')}`;
-
-    results.push({
-      rep_name:     'Huracan Nero Auto Spa',
-      week_start:   weekStart,
-      week_end:     weekEnd,
-      dials,
-      texts,
-      closes,
-      revenue,
-      lead_sources: null,
-      locations:    null,
-    });
-  }
-
-  console.log(`[parseMonthlyTotals] Parsed ${results.length} monthly total rows`);
-  return results;
+  console.log(`[sheetsSync] Done — closes: ${closesCount}, activity: ${activityCount}, weekly: ${weeklyCount}`);
 }
 
-// ─── parseDailyActivity ──────────────────────────────────────────────────────
-
-// KPI_RAW sheet: Rep | Date | Dials | Texts
-function parseDailyActivity(rows) {
-  const results = [];
-  for (let i = 1; i < rows.length; i++) {
-    const row   = rows[i];
-    const rep   = (row[0] || '').trim();
-    if (!rep || rep === 'Rep') continue;
-    const date  = parseDate(row[1]);
-    if (!date) continue;
-    const dials = parseInt(row[2], 10) || 0;
-    const texts = parseInt(row[3], 10) || 0;
-    if (!dials && !texts) continue;
-    results.push({ rep_name: rep, activity_date: date, dials, texts });
-  }
-  return results;
-}
-
-// ─── fetchParsed (debug — no DB writes) ──────────────────────────────────────
-
-async function fetchParsed() {
-  const [weeklyRows, activityRows] = await Promise.all([
-    sheetsGet('Weekly Summary!A1:Z2000'),
-    sheetsGet('KPI_RAW!A1:Z2000'),
-  ]);
-
-  return {
-    weekly_stats:    parseWeeklyStats(weeklyRows),
-    monthly_totals:  parseMonthlyTotals(weeklyRows),
-    closes:          parseCloseLog(weeklyRows),
-    activity:        parseDailyActivity(activityRows),
-    raw_weekly_sample: weeklyRows.slice(0, 40),
-  };
-}
-
-// ─── syncSheetsData ──────────────────────────────────────────────────────────
-
-async function syncSheetsData() {
-  const summary = { weekly: 0, closes: 0, activity: 0, errors: [] };
-
-  let weeklyRows, activityRows;
-  try {
-    [weeklyRows, activityRows] = await Promise.all([
-      sheetsGet('Weekly Summary!A1:Z2000'),
-      sheetsGet('KPI_RAW!A1:Z2000'),
-    ]);
-  } catch (err) {
-    summary.errors.push({ source: 'fetch', error: err.message });
-    return summary;
-  }
-
-  const weeklyStats    = parseWeeklyStats(weeklyRows);
-  const monthlyTotals  = parseMonthlyTotals(weeklyRows);
-  const closes         = parseCloseLog(weeklyRows);
-  const activity       = parseDailyActivity(activityRows);
-  const now            = new Date().toISOString();
-
-  try {
-    await db.transaction(async (tx) => {
-      // Weekly stats + monthly totals: upsert by (rep_name, week_start)
-      for (const row of [...weeklyStats, ...monthlyTotals]) {
-        await tx.run(
-          `INSERT INTO rep_weekly_stats
-             (rep_name, week_start, week_end, dials, texts, closes, revenue, lead_sources, locations, synced_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(rep_name, week_start) DO UPDATE SET
-             week_end     = excluded.week_end,
-             dials        = excluded.dials,
-             texts        = excluded.texts,
-             closes       = excluded.closes,
-             revenue      = excluded.revenue,
-             lead_sources = excluded.lead_sources,
-             locations    = excluded.locations,
-             synced_at    = excluded.synced_at`,
-          [row.rep_name, row.week_start, row.week_end, row.dials, row.texts,
-           row.closes, row.revenue, row.lead_sources, row.locations, now]
-        );
-        summary.weekly++;
-      }
-
-      // Closes: non-destructive upsert keyed on (rep_name, close_date, revenue).
-      for (const row of closes) {
-        const { lastId } = await tx.run(
-          `INSERT INTO rep_closes (rep_name, close_date, revenue, lead_source, location, synced_at)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(rep_name, close_date, revenue) DO NOTHING`,
-          [row.rep_name, row.close_date, row.revenue, row.lead_source, row.location, now]
-        );
-        if (lastId !== null) summary.closes++;
-      }
-
-      // Daily activity: upsert by (rep_name, activity_date)
-      for (const row of activity) {
-        await tx.run(
-          `INSERT INTO rep_daily_activity (rep_name, activity_date, dials, texts, synced_at)
-           VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(rep_name, activity_date) DO UPDATE SET
-             dials     = excluded.dials,
-             texts     = excluded.texts,
-             synced_at = excluded.synced_at`,
-          [row.rep_name, row.activity_date, row.dials, row.texts, now]
-        );
-        summary.activity++;
-      }
-    });
-  } catch (err) {
-    summary.errors.push({ source: 'db', error: err.message });
-  }
-
-  console.log(`[sheetsSync] Done — weekly: ${summary.weekly}, closes: ${summary.closes}, activity: ${summary.activity}, errors: ${summary.errors.length}`);
-  return summary;
-}
-
-module.exports = { syncSheetsData, fetchParsed };
+module.exports = { syncSheets };
