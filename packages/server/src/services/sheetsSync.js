@@ -142,11 +142,15 @@ async function syncCloses() {
   }
   console.log(`[sheetsSync] closes tab: ${data.length} rows read`);
   let upserted = 0, skipped = 0;
+  const unmatchedReps = new Set();
 
   for (const row of data) {
     const obj = rowToObj(headers, row);
     const repName = normalizeRep(obj.rep_name);
-    if (!repName) { skipped++; continue; }
+    if (!repName) {
+      if (obj.rep_name) unmatchedReps.add(String(obj.rep_name).trim());
+      skipped++; continue;
+    }
     const saleDate = serialToDate(obj.sale_date);
     if (!saleDate) { skipped++; continue; }
     const revenue = parseRevenue(obj.revenue);
@@ -173,6 +177,9 @@ async function syncCloses() {
     upserted++;
   }
 
+  if (unmatchedReps.size > 0) {
+    console.warn('[sheetsSync] closes: unmatched rep names:', [...unmatchedReps]);
+  }
   console.log(`[sheetsSync] closes: ${upserted} upserted, ${skipped} skipped`);
   return upserted;
 }
@@ -187,11 +194,15 @@ async function syncDailyActivity() {
   }
   console.log(`[sheetsSync] daily_activity tab: ${data.length} rows read`);
   let upserted = 0, skipped = 0;
+  const unmatchedReps = new Set();
 
   for (const row of data) {
     const obj = rowToObj(headers, row);
     const repName = normalizeRep(obj.rep_name);
-    if (!repName) { skipped++; continue; }
+    if (!repName) {
+      if (obj.rep_name) unmatchedReps.add(String(obj.rep_name).trim());
+      skipped++; continue;
+    }
     const date = serialToDate(obj.date);
     if (!date) { skipped++; continue; }
 
@@ -218,6 +229,9 @@ async function syncDailyActivity() {
     upserted++;
   }
 
+  if (unmatchedReps.size > 0) {
+    console.warn('[sheetsSync] daily_activity: unmatched rep names:', [...unmatchedReps]);
+  }
   console.log(`[sheetsSync] daily_activity: ${upserted} upserted, ${skipped} skipped`);
   return upserted;
 }
@@ -298,10 +312,19 @@ async function syncSheetsData() {
     '| API_KEY=',      API_KEY        ? `present (len=${API_KEY.length})`        : 'MISSING',
     '| DATABASE_URL=', process.env.DATABASE_URL ? 'present' : 'MISSING'
   );
-  if (!SPREADSHEET_ID) { console.error('[sheetsSync] GOOGLE_SHEETS_SPREADSHEET_ID not set'); return; }
-  if (!API_KEY)        { console.error('[sheetsSync] GOOGLE_SHEETS_API_KEY not set'); return; }
+  if (!SPREADSHEET_ID) {
+    const msg = 'GOOGLE_SHEETS_SPREADSHEET_ID not set';
+    console.error(`[sheetsSync] ${msg}`);
+    return { ok: false, error: msg };
+  }
+  if (!API_KEY) {
+    const msg = 'GOOGLE_SHEETS_API_KEY not set';
+    console.error(`[sheetsSync] ${msg}`);
+    return { ok: false, error: msg };
+  }
 
   console.log('[sheetsSync] Starting full sync...');
+  const startedAt = Date.now();
 
   let closesCount, activityCount, weeklyCount;
   try {
@@ -323,7 +346,16 @@ async function syncSheetsData() {
     throw err;
   }
 
-  console.log(`[sheetsSync] Done — closes: ${closesCount}, activity: ${activityCount}, weekly: ${weeklyCount}`);
+  const durationMs = Date.now() - startedAt;
+  console.log(`[sheetsSync] Done in ${durationMs}ms — closes: ${closesCount}, activity: ${activityCount}, weekly: ${weeklyCount}`);
+  return {
+    ok: true,
+    closes:   closesCount,
+    activity: activityCount,
+    weekly:   weeklyCount,
+    duration_ms: durationMs,
+    ts: new Date().toISOString(),
+  };
 }
 
 module.exports = { syncSheetsData };

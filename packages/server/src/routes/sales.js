@@ -163,10 +163,10 @@ router.get('/today', async (req, res) => {
     );
 
     const closes = await db.query(
-      `SELECT rowid AS seq, rep_name, close_date, revenue, lead_source, location
+      `SELECT id AS seq, rep_name, close_date, revenue, lead_source, location
        FROM rep_closes
        WHERE close_date = ?
-       ORDER BY rowid DESC`,
+       ORDER BY id DESC`,
       [date]
     );
 
