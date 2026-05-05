@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const db = require('../../db/schema');
-const { syncSheetsData, fetchParsed } = require('../services/sheetsSync');
+const { syncSheetsData, computeWeeklyStats, fetchParsed } = require('../services/sheetsSync');
 
 const router = Router();
 
@@ -303,6 +303,39 @@ router.get('/debug-sync', async (_req, res) => {
   try {
     const data = await fetchParsed();
     res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/sales/cleanup-stale-reps ──────────────────────────────────────
+// One-shot: remove rows written under short/wrong rep_name values, then
+// recompute weekly stats. Remove this route after running it once.
+
+const STALE_REP_NAMES = ['Alejandro', 'Jahmad', 'Martinez', 'Rodrigo', 'Jacob', 'Alex', '05/11-05/17'];
+
+router.post('/cleanup-stale-reps', async (_req, res) => {
+  try {
+    const placeholders = STALE_REP_NAMES.map(() => '?').join(',');
+
+    const before = {
+      rep_closes:         (await db.queryOne(`SELECT CAST(COUNT(*) AS INTEGER) AS n FROM rep_closes         WHERE rep_name IN (${placeholders})`, STALE_REP_NAMES))?.n ?? 0,
+      rep_daily_activity: (await db.queryOne(`SELECT CAST(COUNT(*) AS INTEGER) AS n FROM rep_daily_activity WHERE rep_name IN (${placeholders})`, STALE_REP_NAMES))?.n ?? 0,
+      rep_weekly_stats:   (await db.queryOne(`SELECT CAST(COUNT(*) AS INTEGER) AS n FROM rep_weekly_stats   WHERE rep_name IN (${placeholders})`, STALE_REP_NAMES))?.n ?? 0,
+    };
+
+    await db.run(`DELETE FROM rep_closes         WHERE rep_name IN (${placeholders})`, STALE_REP_NAMES);
+    await db.run(`DELETE FROM rep_daily_activity WHERE rep_name IN (${placeholders})`, STALE_REP_NAMES);
+    await db.run(`DELETE FROM rep_weekly_stats   WHERE rep_name IN (${placeholders})`, STALE_REP_NAMES);
+
+    const weekly_recomputed = await computeWeeklyStats();
+
+    res.json({
+      ok: true,
+      stale_names: STALE_REP_NAMES,
+      deleted: before,
+      weekly_recomputed,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -378,4 +378,4 @@ async function syncSheetsData() {
   };
 }
 
-module.exports = { syncSheetsData };
+module.exports = { syncSheetsData, computeWeeklyStats };
