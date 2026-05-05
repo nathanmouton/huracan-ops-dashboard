@@ -1,7 +1,7 @@
 'use strict';
 
 const fetch = require('node-fetch');
-const pool  = require('../../db/schema');
+const db    = require('../../db/schema');
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
 const API_KEY        = process.env.GOOGLE_SHEETS_API_KEY;
@@ -119,23 +119,20 @@ function normalizeLeadSource(raw) {
   return LEAD_SOURCE_MAP[String(raw).toLowerCase().trim()] || 'Other';
 }
 
-async function loadRepMap() {
-  console.log('[sheetsSync] loadRepMap: querying reps table...');
-  const startedAt = Date.now();
-  let rows;
-  try {
-    ({ rows } = await pool.query('SELECT id, name FROM reps'));
-  } catch (err) {
-    console.error('[sheetsSync] loadRepMap query error:', err);
-    throw err;
-  }
-  console.log(`[sheetsSync] loadRepMap: got ${rows.length} rows in ${Date.now() - startedAt}ms`);
-  const map = {};
-  rows.forEach(r => { map[r.name] = r.id; });
-  return map;
+function isoDate(d) {
+  return d.toISOString().slice(0, 10);
 }
 
-async function syncCloses(repMap) {
+function weekBounds(d) {
+  const day    = d.getUTCDay();           // 0=Sun..6=Sat
+  const offset = (day + 6) % 7;           // days since Monday
+  const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - offset));
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  return { weekStart: isoDate(monday), weekEnd: isoDate(sunday) };
+}
+
+async function syncCloses() {
   let headers, data;
   try {
     ({ headers, data } = await fetchTab(TABS.closes));
@@ -150,34 +147,27 @@ async function syncCloses(repMap) {
     const obj = rowToObj(headers, row);
     const repName = normalizeRep(obj.rep_name);
     if (!repName) { skipped++; continue; }
-    const repId = repMap[repName];
-    if (!repId)  { skipped++; continue; }
     const saleDate = serialToDate(obj.sale_date);
     if (!saleDate) { skipped++; continue; }
-    // Revenue ONLY from closes tab — never daily_activity
     const revenue = parseRevenue(obj.revenue);
     if (revenue === null) { skipped++; continue; }
 
-    const weekStart     = serialToDate(obj.week_start);
-    const leadSource    = normalizeLeadSource(obj.lead_source);
-    const location      = obj.location       ? String(obj.location).trim()       : null;
-    const dealType      = obj.deal_type      ? String(obj.deal_type).trim()      : null;
-    const bookingStatus = obj.booking_status ? String(obj.booking_status).trim() : null;
+    const closeDate  = isoDate(saleDate);
+    const leadSource = normalizeLeadSource(obj.lead_source);
+    const location   = obj.location ? String(obj.location).trim() : null;
 
     try {
-      await pool.query(
-        `INSERT INTO rep_closes
-           (rep_id, sale_date, revenue, lead_source, location, booking_status, deal_type, week_start)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (rep_id, sale_date, revenue, lead_source, location)
-           DO UPDATE SET
-             booking_status = EXCLUDED.booking_status,
-             deal_type      = EXCLUDED.deal_type,
-             week_start     = EXCLUDED.week_start`,
-        [repId, saleDate, revenue, leadSource, location, bookingStatus, dealType, weekStart]
+      await db.run(
+        `INSERT INTO rep_closes (rep_name, close_date, revenue, lead_source, location)
+         VALUES (?,?,?,?,?)
+         ON CONFLICT (rep_name, close_date, revenue) DO UPDATE SET
+           lead_source = EXCLUDED.lead_source,
+           location    = EXCLUDED.location,
+           synced_at   = CURRENT_TIMESTAMP`,
+        [repName, closeDate, revenue, leadSource, location]
       );
     } catch (err) {
-      console.error('[sheetsSync] syncCloses upsert failed for row:', { repName, saleDate, revenue, leadSource, location }, err);
+      console.error('[sheetsSync] syncCloses upsert failed for row:', { repName, closeDate, revenue, leadSource, location }, err);
       throw err;
     }
     upserted++;
@@ -187,7 +177,7 @@ async function syncCloses(repMap) {
   return upserted;
 }
 
-async function syncDailyActivity(repMap) {
+async function syncDailyActivity() {
   let headers, data;
   try {
     ({ headers, data } = await fetchTab(TABS.daily_activity));
@@ -202,38 +192,27 @@ async function syncDailyActivity(repMap) {
     const obj = rowToObj(headers, row);
     const repName = normalizeRep(obj.rep_name);
     if (!repName) { skipped++; continue; }
-    const repId = repMap[repName];
-    if (!repId)  { skipped++; continue; }
     const date = serialToDate(obj.date);
-    if (!date)   { skipped++; continue; }
+    if (!date) { skipped++; continue; }
 
-    const dials         = parseIntVal(obj.dials);
-    const texts         = parseIntVal(obj.texts);
-    const conversations = parseIntVal(obj.conversations);
-    const closes        = parseIntVal(obj.closes);
+    const dials = parseIntVal(obj.dials);
+    const texts = parseIntVal(obj.texts);
+    if (dials === 0 && texts === 0) { skipped++; continue; }
 
-    if (dials === 0 && texts === 0 && conversations === 0 && closes === 0) {
-      skipped++; continue;
-    }
-
-    // Revenue intentionally NOT read or stored from daily_activity.
-    // All revenue comes from rep_closes only.
+    const activityDate = isoDate(date);
 
     try {
-      await pool.query(
-        `INSERT INTO rep_daily_activity
-           (rep_id, date, dials, texts, conversations, closes)
-         VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (rep_id, date)
-           DO UPDATE SET
-             dials         = EXCLUDED.dials,
-             texts         = EXCLUDED.texts,
-             conversations = EXCLUDED.conversations,
-             closes        = EXCLUDED.closes`,
-        [repId, date, dials, texts, conversations, closes]
+      await db.run(
+        `INSERT INTO rep_daily_activity (rep_name, activity_date, dials, texts)
+         VALUES (?,?,?,?)
+         ON CONFLICT (rep_name, activity_date) DO UPDATE SET
+           dials     = EXCLUDED.dials,
+           texts     = EXCLUDED.texts,
+           synced_at = CURRENT_TIMESTAMP`,
+        [repName, activityDate, dials, texts]
       );
     } catch (err) {
-      console.error('[sheetsSync] syncDailyActivity upsert failed for row:', { repName, date, dials, texts, conversations, closes }, err);
+      console.error('[sheetsSync] syncDailyActivity upsert failed for row:', { repName, activityDate, dials, texts }, err);
       throw err;
     }
     upserted++;
@@ -244,57 +223,66 @@ async function syncDailyActivity(repMap) {
 }
 
 async function computeWeeklyStats() {
-  let closesRes;
+  // Aggregate weekly buckets in JS for dialect-portability (no PG-only date math).
+  let closes;
   try {
-    closesRes = await pool.query(`
-      SELECT rep_id, week_start,
-             SUM(revenue) AS revenue,
-             COUNT(*)     AS closes
-      FROM rep_closes
-      WHERE booking_status = 'Completed'
-        AND week_start IS NOT NULL
-      GROUP BY rep_id, week_start
-    `);
+    closes = await db.query(`SELECT rep_name, close_date, revenue FROM rep_closes`);
   } catch (err) {
-    console.error('[sheetsSync] computeWeeklyStats: closes aggregate query failed:', err);
+    console.error('[sheetsSync] computeWeeklyStats: closes query failed:', err);
     throw err;
   }
 
-  let upserted = 0;
-  for (const row of closesRes.rows) {
-    let actRes;
-    try {
-      actRes = await pool.query(`
-        SELECT COALESCE(SUM(dials),0) AS dials,
-               COALESCE(SUM(texts),0) AS texts
-        FROM rep_daily_activity
-        WHERE rep_id = $1
-          AND date >= $2
-          AND date <  $2::date + INTERVAL '7 days'
-      `, [row.rep_id, row.week_start]);
-    } catch (err) {
-      console.error('[sheetsSync] computeWeeklyStats: activity sum query failed for', { rep_id: row.rep_id, week_start: row.week_start }, err);
-      throw err;
+  const buckets = new Map();
+  for (const c of closes) {
+    if (!c.rep_name || !c.close_date) continue;
+    const d = new Date(c.close_date);
+    if (isNaN(d.getTime())) continue;
+    const { weekStart, weekEnd } = weekBounds(d);
+    const key = `${c.rep_name}|${weekStart}`;
+    let b = buckets.get(key);
+    if (!b) {
+      b = { rep_name: c.rep_name, week_start: weekStart, week_end: weekEnd, revenue: 0, closes: 0 };
+      buckets.set(key, b);
     }
+    b.revenue += Number(c.revenue) || 0;
+    b.closes  += 1;
+  }
 
-    const dials = parseIntVal(actRes.rows[0]?.dials);
-    const texts = parseIntVal(actRes.rows[0]?.texts);
-
+  let upserted = 0;
+  for (const b of buckets.values()) {
+    let actRow;
     try {
-      await pool.query(
-        `INSERT INTO rep_weekly_stats
-           (rep_id, week_start, revenue, closes, dials, texts)
-         VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (rep_id, week_start)
-           DO UPDATE SET
-             revenue = EXCLUDED.revenue,
-             closes  = EXCLUDED.closes,
-             dials   = EXCLUDED.dials,
-             texts   = EXCLUDED.texts`,
-        [row.rep_id, row.week_start, row.revenue, row.closes, dials, texts]
+      actRow = await db.queryOne(
+        `SELECT COALESCE(SUM(dials),0) AS dials, COALESCE(SUM(texts),0) AS texts
+         FROM rep_daily_activity
+         WHERE rep_name = ?
+           AND activity_date >= ?
+           AND activity_date <= ?`,
+        [b.rep_name, b.week_start, b.week_end]
       );
     } catch (err) {
-      console.error('[sheetsSync] computeWeeklyStats: weekly upsert failed for', { rep_id: row.rep_id, week_start: row.week_start }, err);
+      console.error('[sheetsSync] computeWeeklyStats: activity sum query failed for', { rep_name: b.rep_name, week_start: b.week_start }, err);
+      throw err;
+    }
+    const dials = parseIntVal(actRow?.dials);
+    const texts = parseIntVal(actRow?.texts);
+
+    try {
+      await db.run(
+        `INSERT INTO rep_weekly_stats
+           (rep_name, week_start, week_end, dials, texts, closes, revenue)
+         VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT (rep_name, week_start) DO UPDATE SET
+           week_end  = EXCLUDED.week_end,
+           dials     = EXCLUDED.dials,
+           texts     = EXCLUDED.texts,
+           closes    = EXCLUDED.closes,
+           revenue   = EXCLUDED.revenue,
+           synced_at = CURRENT_TIMESTAMP`,
+        [b.rep_name, b.week_start, b.week_end, dials, texts, b.closes, b.revenue]
+      );
+    } catch (err) {
+      console.error('[sheetsSync] computeWeeklyStats: weekly upsert failed for', { rep_name: b.rep_name, week_start: b.week_start }, err);
       throw err;
     }
     upserted++;
@@ -315,24 +303,15 @@ async function syncSheetsData() {
 
   console.log('[sheetsSync] Starting full sync...');
 
-  let repMap;
-  try {
-    repMap = await loadRepMap();
-  } catch (err) {
-    console.error('[sheetsSync] loadRepMap failed:', err);
-    throw err;
-  }
-  console.log(`[sheetsSync] Loaded ${Object.keys(repMap).length} reps from DB`);
-
   let closesCount, activityCount, weeklyCount;
   try {
-    closesCount = await syncCloses(repMap);
+    closesCount = await syncCloses();
   } catch (err) {
     console.error('[sheetsSync] syncCloses failed:', err);
     throw err;
   }
   try {
-    activityCount = await syncDailyActivity(repMap);
+    activityCount = await syncDailyActivity();
   } catch (err) {
     console.error('[sheetsSync] syncDailyActivity failed:', err);
     throw err;
