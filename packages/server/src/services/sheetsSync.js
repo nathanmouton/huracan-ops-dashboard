@@ -88,6 +88,26 @@ function rowToObj(headers, row) {
 
 function serialToDate(serial) {
   if (serial === null || serial === undefined || serial === '' || serial === '-') return null;
+
+  if (typeof serial === 'string') {
+    const s = serial.trim();
+    // ISO: YYYY-MM-DD (optionally followed by time)
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      const [y, m, d] = s.slice(0, 10).split('-').map(Number);
+      const date = new Date(Date.UTC(y, m - 1, d));
+      return isNaN(date.getTime()) ? null : date;
+    }
+    // US-style: M/D/YYYY or MM/DD/YYYY
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+      const [m, d, y] = s.split('/').map(Number);
+      const date = new Date(Date.UTC(y, m - 1, d));
+      return isNaN(date.getTime()) ? null : date;
+    }
+    // Only fall through to serial-number parsing for pure numeric strings,
+    // so we don't decode "2024-03-15" as parseFloat -> 2024 -> June 1905.
+    if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  }
+
   const num = typeof serial === 'string' ? parseFloat(serial) : Number(serial);
   if (isNaN(num) || num <= 0) return null;
   const date = new Date(Date.UTC(1899, 11, 30) + Math.round(num) * 86400000);

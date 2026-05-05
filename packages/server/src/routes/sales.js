@@ -308,4 +308,55 @@ router.get('/debug-sync', async (_req, res) => {
   }
 });
 
+// ─── GET /api/sales/debug-data ───────────────────────────────────────────────
+// Snapshot of rep_closes / rep_daily_activity contents for diagnostics.
+
+router.get('/debug-data', async (_req, res) => {
+  try {
+    const closesTotal     = await db.queryOne(`SELECT CAST(COUNT(*) AS INTEGER) AS n, COALESCE(SUM(revenue), 0) AS revenue FROM rep_closes`);
+    const closesDateRange = await db.queryOne(`SELECT MIN(close_date) AS min_date, MAX(close_date) AS max_date FROM rep_closes`);
+    const closesByMonth   = await db.query(
+      `SELECT SUBSTR(close_date, 1, 7) AS month,
+              CAST(COUNT(*) AS INTEGER) AS closes,
+              COALESCE(SUM(revenue), 0) AS revenue
+       FROM rep_closes
+       GROUP BY SUBSTR(close_date, 1, 7)
+       ORDER BY month`
+    );
+    const closesByRep = await db.query(
+      `SELECT rep_name, CAST(COUNT(*) AS INTEGER) AS closes, COALESCE(SUM(revenue), 0) AS revenue
+       FROM rep_closes
+       GROUP BY rep_name
+       ORDER BY revenue DESC`
+    );
+    const closesSample = await db.query(`SELECT id, rep_name, close_date, revenue, lead_source, location FROM rep_closes ORDER BY id DESC LIMIT 5`);
+
+    const activityTotal     = await db.queryOne(`SELECT CAST(COUNT(*) AS INTEGER) AS n, COALESCE(SUM(dials), 0) AS dials, COALESCE(SUM(texts), 0) AS texts FROM rep_daily_activity`);
+    const activityDateRange = await db.queryOne(`SELECT MIN(activity_date) AS min_date, MAX(activity_date) AS max_date FROM rep_daily_activity`);
+    const activitySample    = await db.query(`SELECT id, rep_name, activity_date, dials, texts FROM rep_daily_activity ORDER BY id DESC LIMIT 5`);
+
+    res.json({
+      now: new Date().toISOString(),
+      current_month_filter: new Date().toISOString().slice(0, 7),
+      rep_closes: {
+        total:        closesTotal.n,
+        revenue_sum:  closesTotal.revenue,
+        date_range:   closesDateRange,
+        by_month:     closesByMonth,
+        by_rep:       closesByRep,
+        sample:       closesSample,
+      },
+      rep_daily_activity: {
+        total:      activityTotal.n,
+        dials_sum:  activityTotal.dials,
+        texts_sum:  activityTotal.texts,
+        date_range: activityDateRange,
+        sample:     activitySample,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
