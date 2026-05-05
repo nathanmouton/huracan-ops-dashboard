@@ -1,7 +1,7 @@
 'use strict';
 
 const fetch = require('node-fetch');
-const pool  = require('../db');
+const pool  = require('../../db');
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
 const API_KEY        = process.env.GOOGLE_SHEETS_API_KEY;
