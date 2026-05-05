@@ -227,7 +227,7 @@ async function computeWeeklyStats() {
   return upserted;
 }
 
-async function syncSheets() {
+async function syncSheetsData() {
   if (!SPREADSHEET_ID) { console.error('[sheetsSync] GOOGLE_SHEETS_SPREADSHEET_ID not set'); return; }
   if (!API_KEY)        { console.error('[sheetsSync] GOOGLE_SHEETS_API_KEY not set'); return; }
 
@@ -242,4 +242,4 @@ async function syncSheets() {
   console.log(`[sheetsSync] Done — closes: ${closesCount}, activity: ${activityCount}, weekly: ${weeklyCount}`);
 }
 
-module.exports = { syncSheets };
+module.exports = { syncSheetsData };
