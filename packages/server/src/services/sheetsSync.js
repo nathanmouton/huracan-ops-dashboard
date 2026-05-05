@@ -20,6 +20,22 @@ const REP_NAME_MAP = {
   'gage weiser':        'Gage Weiser',
 };
 
+const BOOKING_STATUS_MAP = {
+  'completed':    'Completed',
+  'complete':     'Completed',
+  'scheduled':    'Scheduled',
+  'rescheduled':  'Rescheduled',
+  're-scheduled': 'Rescheduled',
+  'waitlisted':   'Waitlisted',
+  'wait listed':  'Waitlisted',
+  'wait-listed':  'Waitlisted',
+  'canceled':     'Canceled',
+  'cancelled':    'Canceled',
+  'no show':      'No Show',
+  'no-show':      'No Show',
+  'noshow':       'No Show',
+};
+
 const LEAD_SOURCE_MAP = {
   'meta':          'Meta',
   'website':       'Website',
@@ -139,6 +155,12 @@ function normalizeLeadSource(raw) {
   return LEAD_SOURCE_MAP[String(raw).toLowerCase().trim()] || 'Other';
 }
 
+function normalizeBookingStatus(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const s = String(raw).trim();
+  return BOOKING_STATUS_MAP[s.toLowerCase()] || s;
+}
+
 function isoDate(d) {
   return d.toISOString().slice(0, 10);
 }
@@ -176,22 +198,24 @@ async function syncCloses() {
     const revenue = parseRevenue(obj.revenue);
     if (revenue === null) { skipped++; continue; }
 
-    const closeDate  = isoDate(saleDate);
-    const leadSource = normalizeLeadSource(obj.lead_source);
-    const location   = obj.location ? String(obj.location).trim() : null;
+    const closeDate     = isoDate(saleDate);
+    const leadSource    = normalizeLeadSource(obj.lead_source);
+    const location      = obj.location ? String(obj.location).trim() : null;
+    const bookingStatus = normalizeBookingStatus(obj.booking_status);
 
     try {
       await db.run(
-        `INSERT INTO rep_closes (rep_name, close_date, revenue, lead_source, location)
-         VALUES (?,?,?,?,?)
+        `INSERT INTO rep_closes (rep_name, close_date, revenue, lead_source, location, booking_status)
+         VALUES (?,?,?,?,?,?)
          ON CONFLICT (rep_name, close_date, revenue) DO UPDATE SET
-           lead_source = EXCLUDED.lead_source,
-           location    = EXCLUDED.location,
-           synced_at   = CURRENT_TIMESTAMP`,
-        [repName, closeDate, revenue, leadSource, location]
+           lead_source    = EXCLUDED.lead_source,
+           location       = EXCLUDED.location,
+           booking_status = EXCLUDED.booking_status,
+           synced_at      = CURRENT_TIMESTAMP`,
+        [repName, closeDate, revenue, leadSource, location, bookingStatus]
       );
     } catch (err) {
-      console.error('[sheetsSync] syncCloses upsert failed for row:', { repName, closeDate, revenue, leadSource, location }, err);
+      console.error('[sheetsSync] syncCloses upsert failed for row:', { repName, closeDate, revenue, leadSource, location, bookingStatus }, err);
       throw err;
     }
     upserted++;
@@ -260,7 +284,11 @@ async function computeWeeklyStats() {
   // Aggregate weekly buckets in JS for dialect-portability (no PG-only date math).
   let closes;
   try {
-    closes = await db.query(`SELECT rep_name, close_date, revenue FROM rep_closes`);
+    closes = await db.query(
+      `SELECT rep_name, close_date, revenue FROM rep_closes
+       WHERE (booking_status IS NULL
+              OR booking_status IN ('Completed','Scheduled','Rescheduled','Waitlisted'))`
+    );
   } catch (err) {
     console.error('[sheetsSync] computeWeeklyStats: closes query failed:', err);
     throw err;

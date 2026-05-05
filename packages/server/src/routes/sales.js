@@ -10,6 +10,12 @@ const LOCATION_GOALS = {
 };
 const REP_GOAL = 100000;
 
+// Booking statuses that count toward revenue/closes. Canceled and No Show
+// are excluded. NULL is included so legacy rows (synced before the
+// booking_status column existed) still show up until the next sync.
+const ACTIVE_STATUS_SQL =
+  `(booking_status IS NULL OR booking_status IN ('Completed','Scheduled','Rescheduled','Waitlisted'))`;
+
 // ─── GET /api/sales/kpis ─────────────────────────────────────────────────────
 
 router.get('/kpis', async (req, res) => {
@@ -23,7 +29,8 @@ router.get('/kpis', async (req, res) => {
     const closeTotals = await db.queryOne(
       `SELECT CAST(COUNT(*) AS INTEGER) AS closes, COALESCE(SUM(revenue), 0) AS revenue
        FROM rep_closes
-       WHERE SUBSTR(close_date, 1, 7) = ?`,
+       WHERE SUBSTR(close_date, 1, 7) = ?
+         AND ${ACTIVE_STATUS_SQL}`,
       [month]
     );
 
@@ -51,6 +58,7 @@ router.get('/kpis', async (req, res) => {
          COALESCE(SUM(revenue), 0) AS revenue
        FROM rep_closes
        WHERE SUBSTR(close_date, 1, 7) = ?
+         AND ${ACTIVE_STATUS_SQL}
        GROUP BY rep_name`,
       [month]
     );
@@ -86,6 +94,7 @@ router.get('/kpis', async (req, res) => {
          COALESCE(SUM(revenue), 0)         AS revenue
        FROM rep_closes
        WHERE SUBSTR(close_date, 1, 7) = ?
+         AND ${ACTIVE_STATUS_SQL}
        GROUP BY lead_source
        ORDER BY closes DESC`,
       [month]
@@ -99,6 +108,7 @@ router.get('/kpis', async (req, res) => {
          COALESCE(SUM(revenue), 0)      AS revenue
        FROM rep_closes
        WHERE SUBSTR(close_date, 1, 7) = ?
+         AND ${ACTIVE_STATUS_SQL}
        GROUP BY location
        ORDER BY closes DESC`,
       [month]
@@ -119,6 +129,7 @@ router.get('/kpis', async (req, res) => {
       `SELECT rep_name, close_date, COALESCE(SUM(revenue), 0) AS revenue
        FROM rep_closes
        WHERE SUBSTR(close_date, 1, 7) = ?
+         AND ${ACTIVE_STATUS_SQL}
        GROUP BY rep_name, close_date
        ORDER BY rep_name, close_date`,
       [month]
@@ -150,22 +161,24 @@ router.get('/today', async (req, res) => {
   try {
     // Accept browser local date to avoid UTC vs local mismatch.
     const date = req.query.date
-      || (await db.queryOne('SELECT MAX(close_date) AS d FROM rep_closes'))?.d
+      || (await db.queryOne(`SELECT MAX(close_date) AS d FROM rep_closes WHERE ${ACTIVE_STATUS_SQL}`))?.d
       || new Date().toISOString().split('T')[0];
 
     const byRep = await db.query(
       `SELECT rep_name, CAST(COUNT(*) AS INTEGER) AS closes, COALESCE(SUM(revenue), 0) AS revenue
        FROM rep_closes
        WHERE close_date = ?
+         AND ${ACTIVE_STATUS_SQL}
        GROUP BY rep_name
        ORDER BY revenue DESC`,
       [date]
     );
 
     const closes = await db.query(
-      `SELECT id AS seq, rep_name, close_date, revenue, lead_source, location
+      `SELECT id AS seq, rep_name, close_date, revenue, lead_source, location, booking_status
        FROM rep_closes
        WHERE close_date = ?
+         AND ${ACTIVE_STATUS_SQL}
        ORDER BY id DESC`,
       [date]
     );
@@ -201,7 +214,8 @@ router.get('/annual', async (req, res) => {
     const totals = await db.queryOne(
       `SELECT CAST(COUNT(*) AS INTEGER) AS closes, COALESCE(SUM(revenue), 0) AS revenue
        FROM rep_closes
-       WHERE SUBSTR(close_date, 1, 4) = ?`,
+       WHERE SUBSTR(close_date, 1, 4) = ?
+         AND ${ACTIVE_STATUS_SQL}`,
       [yearStr]
     );
 
@@ -219,6 +233,7 @@ router.get('/annual', async (req, res) => {
       `SELECT rep_name, CAST(COUNT(*) AS INTEGER) AS closes, COALESCE(SUM(revenue), 0) AS revenue
        FROM rep_closes
        WHERE SUBSTR(close_date, 1, 4) = ?
+         AND ${ACTIVE_STATUS_SQL}
        GROUP BY rep_name`,
       [yearStr]
     );
@@ -230,6 +245,7 @@ router.get('/annual', async (req, res) => {
          COALESCE(SUM(revenue), 0)           AS revenue
        FROM rep_closes
        WHERE SUBSTR(close_date, 1, 4) = ?
+         AND ${ACTIVE_STATUS_SQL}
        GROUP BY SUBSTR(close_date, 1, 7)
        ORDER BY month ASC`,
       [yearStr]
@@ -242,6 +258,7 @@ router.get('/annual', async (req, res) => {
          COALESCE(SUM(revenue), 0)         AS revenue
        FROM rep_closes
        WHERE SUBSTR(close_date, 1, 4) = ?
+         AND ${ACTIVE_STATUS_SQL}
        GROUP BY lead_source
        ORDER BY revenue DESC`,
       [yearStr]
@@ -254,6 +271,7 @@ router.get('/annual', async (req, res) => {
          COALESCE(SUM(revenue), 0)      AS revenue
        FROM rep_closes
        WHERE SUBSTR(close_date, 1, 4) = ?
+         AND ${ACTIVE_STATUS_SQL}
        GROUP BY location
        ORDER BY revenue DESC`,
       [yearStr]

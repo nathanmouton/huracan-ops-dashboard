@@ -234,15 +234,18 @@ const PG_DDL = `
   );
 
   CREATE TABLE IF NOT EXISTS rep_closes (
-    id          SERIAL PRIMARY KEY,
-    rep_name    TEXT NOT NULL,
-    close_date  TEXT NOT NULL,
-    revenue     REAL NOT NULL DEFAULT 0,
-    lead_source TEXT,
-    location    TEXT,
-    synced_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    id             SERIAL PRIMARY KEY,
+    rep_name       TEXT NOT NULL,
+    close_date     TEXT NOT NULL,
+    revenue        REAL NOT NULL DEFAULT 0,
+    lead_source    TEXT,
+    location       TEXT,
+    booking_status TEXT,
+    synced_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(rep_name, close_date, revenue)
   );
+
+  ALTER TABLE rep_closes ADD COLUMN IF NOT EXISTS booking_status TEXT;
 
   CREATE TABLE IF NOT EXISTS rep_daily_activity (
     id            SERIAL PRIMARY KEY,
@@ -365,13 +368,14 @@ async function initSchema() {
       );
 
       CREATE TABLE IF NOT EXISTS rep_closes (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        rep_name    TEXT NOT NULL,
-        close_date  TEXT NOT NULL,
-        revenue     REAL NOT NULL DEFAULT 0,
-        lead_source TEXT,
-        location    TEXT,
-        synced_at   TEXT NOT NULL DEFAULT (datetime('now'))
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        rep_name       TEXT NOT NULL,
+        close_date     TEXT NOT NULL,
+        revenue        REAL NOT NULL DEFAULT 0,
+        lead_source    TEXT,
+        location       TEXT,
+        booking_status TEXT,
+        synced_at      TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
       CREATE TABLE IF NOT EXISTS rep_daily_activity (
@@ -400,6 +404,7 @@ async function initSchema() {
       "ALTER TABLE upsells  ADD COLUMN external_id   TEXT",
       "ALTER TABLE upsells  ADD COLUMN location_id   INTEGER REFERENCES locations(id)",
       "ALTER TABLE upsells  ADD COLUMN sold_at       TEXT",
+      "ALTER TABLE rep_closes ADD COLUMN booking_status TEXT",
     ];
     for (const sql of addColumns) {
       try { sqliteDb.exec(sql); } catch (e) {
