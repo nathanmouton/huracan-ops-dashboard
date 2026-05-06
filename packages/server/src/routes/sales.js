@@ -10,11 +10,13 @@ const LOCATION_GOALS = {
 };
 const REP_GOAL = 100000;
 
-// Booking statuses that count toward revenue/closes. Canceled and No Show
-// are excluded. NULL is included so legacy rows (synced before the
-// booking_status column existed) still show up until the next sync.
+// Booking statuses that count toward revenue/closes. Only Canceled and
+// No Show are excluded; everything else (Completed, Scheduled,
+// Rescheduled, Waitlisted, NULL, and any unknown status) is included.
+// SQL note: bare `booking_status NOT IN (...)` evaluates to NULL for
+// NULL rows, so the IS NULL branch is required to keep legacy/blank rows.
 const ACTIVE_STATUS_SQL =
-  `(booking_status IS NULL OR booking_status IN ('Completed','Scheduled','Rescheduled','Waitlisted'))`;
+  `(booking_status IS NULL OR booking_status NOT IN ('Canceled','No Show'))`;
 
 // ─── GET /api/sales/kpis ─────────────────────────────────────────────────────
 

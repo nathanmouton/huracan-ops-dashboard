@@ -289,7 +289,7 @@ async function computeWeeklyStats() {
     closes = await db.query(
       `SELECT rep_name, close_date, revenue FROM rep_closes
        WHERE (booking_status IS NULL
-              OR booking_status IN ('Completed','Scheduled','Rescheduled','Waitlisted'))`
+              OR booking_status NOT IN ('Canceled','No Show'))`
     );
   } catch (err) {
     console.error('[sheetsSync] computeWeeklyStats: closes query failed:', err);
