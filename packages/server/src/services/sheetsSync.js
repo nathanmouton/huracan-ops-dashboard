@@ -91,8 +91,9 @@ async function fetchTab(tabName) {
   const rows = json.values || [];
   console.log(`[sheetsSync] fetchTab(${tabName}) -> ${rows.length} raw rows`);
   if (rows.length < 2) return { headers: [], data: [] };
+  console.log(`[sheetsSync] fetchTab(${tabName}) raw headers (first 3):`, rows[0].slice(0, 3));
   const headers = rows[0].map(h => String(h).toLowerCase().trim().replace(/[\s-]+/g, '_'));
-  console.log(`[sheetsSync] fetchTab(${tabName}) headers:`, headers);
+  console.log(`[sheetsSync] fetchTab(${tabName}) normalized headers:`, headers);
   const data    = rows.slice(1);
   return { headers, data };
 }
