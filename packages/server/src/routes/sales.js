@@ -380,7 +380,14 @@ router.get('/debug-data', async (_req, res) => {
        GROUP BY rep_name
        ORDER BY revenue DESC`
     );
-    const closesSample = await db.query(`SELECT id, rep_name, close_date, revenue, lead_source, location FROM rep_closes ORDER BY id DESC LIMIT 5`);
+    const closesByStatus = await db.query(
+      `SELECT COALESCE(booking_status, '<NULL>') AS booking_status,
+              CAST(COUNT(*) AS INTEGER) AS n
+       FROM rep_closes
+       GROUP BY booking_status
+       ORDER BY n DESC`
+    );
+    const closesSample = await db.query(`SELECT id, rep_name, close_date, revenue, lead_source, location, booking_status FROM rep_closes ORDER BY id DESC LIMIT 5`);
 
     const activityTotal     = await db.queryOne(`SELECT CAST(COUNT(*) AS INTEGER) AS n, COALESCE(SUM(dials), 0) AS dials, COALESCE(SUM(texts), 0) AS texts FROM rep_daily_activity`);
     const activityDateRange = await db.queryOne(`SELECT MIN(activity_date) AS min_date, MAX(activity_date) AS max_date FROM rep_daily_activity`);
@@ -395,6 +402,7 @@ router.get('/debug-data', async (_req, res) => {
         date_range:   closesDateRange,
         by_month:     closesByMonth,
         by_rep:       closesByRep,
+        by_status:    closesByStatus,
         sample:       closesSample,
       },
       rep_daily_activity: {

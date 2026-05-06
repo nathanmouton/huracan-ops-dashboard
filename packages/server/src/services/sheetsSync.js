@@ -92,6 +92,7 @@ async function fetchTab(tabName) {
   console.log(`[sheetsSync] fetchTab(${tabName}) -> ${rows.length} raw rows`);
   if (rows.length < 2) return { headers: [], data: [] };
   const headers = rows[0].map(h => String(h).toLowerCase().trim().replace(/[\s-]+/g, '_'));
+  console.log(`[sheetsSync] fetchTab(${tabName}) headers:`, headers);
   const data    = rows.slice(1);
   return { headers, data };
 }
